@@ -1,0 +1,14 @@
+{
+    "goods_s_spheroid.tar.gz" : "https://drive.google.com/a/ucsc.edu/uc?export=download&id=1irp1MZWSgWQPn8g41a36BdBdsGvh42YY",
+    "goods_s_disk.tar.gz" : "https://drive.google.com/a/ucsc.edu/uc?export=download&id=1HwvuGWiXBSE8Udm5rrBP2hkpW3ZkLTQ1",
+    "goods_s_irregular.tar.gz" : "https://drive.google.com/a/ucsc.edu/uc?export=download&id=1AAapIngXaKHkadOjwUqpH6etuezVrHYR",
+    "goods_s_ps_compact.tar.gz" : "https://drive.google.com/a/ucsc.edu/uc?export=download&id=1ZGkXNxnHdIqkK0sHZAYXlB2Y7rcH1FUQ",
+    "goods_s_background.tar.gz" : "https://drive.google.com/a/ucsc.edu/uc?export=download&id=1C9XJxe0mPLLf_rNwlCpONmwOt8CzzJsq",
+    "goods_s_mask.tar.gz" : "https://drive.google.com/a/ucsc.edu/uc?export=download&id=1NrGgZoK-YF_agAbo4DuDLuHKyMa_Z9lP",
+    "morpheus_GOODS-S_value_added_catalog.v1.0.csv.tar.gz": "https://drive.google.com/uc?export=download&id=1-qfccMJ-OY4M3_qwPkNEoi6o6f1_QLzn",
+    "hlsp_hlf_hst_wfc3-60mas_goodss_f125w_v2.0_sci.tar.xz" : "https://drive.google.com/a/ucsc.edu/uc?export=download&id=1WxUcbxAvB1B41KUrLIlFszDKuTflajhm",
+    "hlsp_hlf_hst_wfc3-60mas_goodss_f160w_v2.0_sci.tar.xz" : "https://drive.google.com/a/ucsc.edu/uc?export=download&id=1PAUykpSIHJlvOsbcHG5UY2L7W6XSJgov",
+    "hlsp_hlf_hst_acs-60mas_goodss_f606w_v2.0_sci.tar.xz" : "https://drive.google.com/a/ucsc.edu/uc?export=download&id=1jdR42gG-ES8JUPkV-T63JhsEg4krM1ya",
+    "hlsp_hlf_hst_acs-60mas_goodss_f850lp_v2.0_sci.tar.xz" : "https://drive.google.com/a/ucsc.edu/uc?export=download&id=1vhfUAOT_vfjSJDdB1thiA-xHUrYINpcu",
+    "tinytim.tar.gz" : "https://drive.google.com/a/ucsc.edu/uc?export=download&id=1BEE043CD946AgJuG0gwvTlfUji79eM6b"
+}
