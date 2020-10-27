@@ -146,12 +146,15 @@ def get_sources(
     src_image = np.zeros([n_srcs, height, width, bands], dtype=np.float32)
 
     def distribute_source_flux(i, j, b):
+        if background_map[i, j] > 0.9:
+            return
+
         adj_idxs = list(product([i, i-1, i+1], [j, j-1, j+1]))
-        adj_idxs.remove([i,j])
+        adj_idxs.remove((i,j))
         adj_idx_array = np.array(adj_idxs)
 
         pixel_claim_vectors = adj_idx_array - claim_vectors[i, j, b, ...].copy() # [8, 2]
-        pixel_claim_map = claim_maps[i, j, b,...].copy() # [8,]
+        pixel_claim_map = claim_maps[i, j, b, :].copy() # [8,]
         pixel_flux = flux_image[i, j, b] # [0,]
 
         def closest_center(k): # k of 8
@@ -170,8 +173,9 @@ def get_sources(
 
         src_image[:, i, j, b] = src_separation
 
-    idxs = product(height, width, bands)
+    idxs = tqdm(product(range(height), range(width), range(bands)), total=height*width*bands)
 
-    for _ in map(starmap(distribute_source_flux, idxs)): pass
+    for _ in starmap(distribute_source_flux, idxs): pass
 
     return src_image #[n, h, w, b]
+
