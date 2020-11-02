@@ -28,10 +28,7 @@ import numpy as np
 
 # A default function that gives an extended source prior
 def all_extended_source(
-    model_frame,
-    observation,
-    morpheus_label,
-    source_yx,
+    model_frame, observation, morpheus_label, source_yx,
 ) -> scarlet.component.FactorizedComponent:
     return scarlet.ExtendedSource(model_frame, source_yx, observation)
 
@@ -41,7 +38,7 @@ def get_scarlet_source(
     observation,
     scarlet_sr_ctype_f: Callable,
     morpheus_label: np.ndarray,
-    source_yx: Tuple[int, int]
+    source_yx: Tuple[int, int],
 ) -> scarlet.component.FactorizedComponent:
     # For now go with the default scarlet recommendation of ExtendedSource with k=1
     return scarlet.ExtendedSource(model_frame, source_yx, observation)
@@ -51,23 +48,19 @@ def get_scarlet_fit(
     filters: List[str],
     psfs: np.ndarray,
     model_psf: Callable,
-    flux: np.ndarray, # [b, h, w]
-    weights: np.ndarray, # [b, h, w]
-    source_locations: np.ndarray, # [morphologies, h, w,]
-) -> List[np.ndarray]: # list of
+    flux: np.ndarray,  # [b, h, w]
+    weights: np.ndarray,  # [b, h, w]
+    source_locations: np.ndarray,  # [morphologies, h, w,]
+) -> List[np.ndarray]:  # list of
     """Fit scarlet to image for generating labels"""
 
-    model_frame = scarlet.Frame(
-        flux.shape,
-        psfs=model_psf,
-        channels=filters
-    )
+    model_frame = scarlet.Frame(flux.shape, psfs=model_psf, channels=filters)
 
     observation = scarlet.Observation(
         flux - flux.min(),
         psfs=scarlet.ImagePSF(psfs),
         weights=weights,
-        channels=filters
+        channels=filters,
     ).match(model_frame)
 
     get_source = partial(
@@ -78,17 +71,17 @@ def get_scarlet_fit(
         source_locations,
     )
 
-    src_ys, src_xs = np.nonzero(source_locations[0,:,:])
+    src_ys, src_xs = np.nonzero(source_locations[0, :, :])
     sources = list(map(get_source, zip(src_ys, src_xs)))
 
     blend = scarlet.Blend(sources, observation)
-    blend.fit(200, e_rel = 1.e-6)
+    blend.fit(200, e_rel=1.0e-6)
 
     def render_source(obs, src):
         return obs.render(src.get_model(frame=src.frame))
+
     render_f = partial(render_source, observation)
 
     model_src_vals = list(map(render_f, sources))
 
     return model_src_vals
-

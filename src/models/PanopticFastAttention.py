@@ -42,16 +42,29 @@ from tensorflow.keras.models import Model
 LayerFunc = Callable[[tf.Tensor], tf.Tensor]
 Tensorlike = Union[tf.Tensor, np.ndarray]
 
+@gin.configurable()
+def get_model(input_shape = List[int]) -> Model:
 
-def get_model() -> Model:
-    pass
+    inputs = layers.Input(shape=input_shape)
 
+    enc = encoder()
+    dec_semantic = semantic_decoder()
+    dec_intance = instance_decoder()
+
+    enc_outputs = enc(inputs)
+    reversed_outputs = list(reversed(enc_outputs))
+
+    bkg = dec_semantic(reversed_outputs)
+    # expected_out_shapes = [(1, 256, 256, 8, 2), (1, 256, 256, 8), (1, 256, 256, 1)]
+    cv, cm, com = dec_intance(reversed_outputs)
+
+    return Model([inputs], [bkg, cv, cm, com])
 
 @gin.configurable()
 def encoder(
-    input_shape:List[int],
-    layer_filters:List[int],
-    name:str="MorpheusDeblendEncoder"
+    input_shape: Tuple[int, int, int],
+    filters: List[int],
+    name: str = "MorpheusDeblendEncoder",
 ) -> Model:
     """The encoder is a shared representation for both decoder modules.
 
@@ -72,16 +85,15 @@ def encoder(
 
     name_prefixes = (f"ResNet_{i}" for i in count(1))
     res_funcs = starmap(
-        lambda l, n: res_down(l, name_prefix=n),
-        zip(layer_filters, name_prefixes)
+        lambda l, n: res_down(l, name_prefix=n), zip(filters, name_prefixes)
     )
 
     model_outputs = []
-    def apply_res(x:tf.Tensor, func:LayerFunc) -> tf.Tensor:
+
+    def apply_res(x: tf.Tensor, func: LayerFunc) -> tf.Tensor:
         f_x = func(x)
         model_outputs.append(f_x)
         return f_x
-
 
     model_input = layers.Input(shape=input_shape, name=f"{name}_input")
     reduce(apply_res, res_funcs, model_input)
@@ -91,17 +103,24 @@ def encoder(
 
 @gin.configurable()
 def semantic_decoder(
-    output_shape:List[int],
-    filters:List[int],
-    n_classes:int,
-    name:str="MorpheusDeblendSemanticDecoder",
+    output_shape: Tuple[int, int],
+    filters: List[int],
+    n_classes: int,
+    name: str = "MorpheusDeblendSemanticDecoder",
 ) -> Model:
     """The semantic decoder module outputs a class map for semantic segmentation.
 
     """
 
     hw = output_shape[0]
-    input_shapes = list(reversed([[hw//(2**i), hw//(2**i), c] for i,c in enumerate(filters, start=1)]))
+    input_shapes = list(
+        reversed(
+            [
+                [hw // (2 ** i), hw // (2 ** i), c]
+                for i, c in enumerate(filters, start=1)
+            ]
+        )
+    )
 
     inputs = [layers.Input(shape=s) for s in input_shapes]
     att_outs = list(map(lambda x: FastAttention()(x), inputs))
@@ -109,10 +128,15 @@ def semantic_decoder(
     # We map the filters in reverse order because we start small and grow the
     # output back to the input resolution. We add an additional filter for the
     # final upsample and out
-    fuse_funcs = list(map(lambda f: fuse_up(f, name_prefix=name), list(reversed(filters[:-1]))+[filters[-1]]))
+    fuse_funcs = list(
+        map(
+            lambda f: fuse_up(f, name_prefix=name),
+            list(reversed(filters[:-1])) + [filters[-1]],
+        )
+    )
     fuse_funcs_y = list(zip(fuse_funcs, att_outs))
 
-    def apply_fuse(x:tf.Tensor, func_y:Tuple[LayerFunc, tf.Tensor]) -> tf.Tensor:
+    def apply_fuse(x: tf.Tensor, func_y: Tuple[LayerFunc, tf.Tensor]) -> tf.Tensor:
         func, y = func_y
         f_x = func(x, y)
         return f_x
@@ -125,18 +149,24 @@ def semantic_decoder(
     return Model(inputs, [final_conv_out], name=name)
 
 
-
 @gin.configurable()
 def instance_decoder(
-    output_shape:List[int],
-    filters:List[int],
-    name:str="MorpheusDeblendInstanceDecoder",
+    output_shape: Tuple[int, int],
+    filters: List[int],
+    name: str = "MorpheusDeblendInstanceDecoder",
 ) -> Model:
     """The instance decoder outputs the values needed for source separation.
 
     """
     hw = output_shape[0]
-    input_shapes = list(reversed([[hw//(2**i), hw//(2**i), c] for i,c in enumerate(filters, start=1)]))
+    input_shapes = list(
+        reversed(
+            [
+                [hw // (2 ** i), hw // (2 ** i), c]
+                for i, c in enumerate(filters, start=1)
+            ]
+        )
+    )
 
     inputs = [layers.Input(shape=s) for s in input_shapes]
     att_outs = list(map(lambda x: FastAttention()(x), inputs))
@@ -144,11 +174,15 @@ def instance_decoder(
     # We map the filters in reverse order because we start small and grow the
     # output back to the input resolution. We add an additional filter for the
     # final upsample and out
-    fuse_funcs = list(map(lambda f: fuse_up(f, name_prefix=name), list(reversed(filters[:-1]))+[filters[-1]]))
+    fuse_funcs = list(
+        map(
+            lambda f: fuse_up(f, name_prefix=name),
+            list(reversed(filters[:-1])) + [filters[-1]],
+        )
+    )
     fuse_funcs_y = list(zip(fuse_funcs, att_outs))
 
-
-    def apply_fuse(x:tf.Tensor, func_y:Tuple[LayerFunc, tf.Tensor]) -> tf.Tensor:
+    def apply_fuse(x: tf.Tensor, func_y: Tuple[LayerFunc, tf.Tensor]) -> tf.Tensor:
         func, y = func_y
         f_x = func(x, y)
         return f_x
@@ -158,32 +192,28 @@ def instance_decoder(
 
     pre_conv = partial(layers.Conv2D, 32, 5, padding="SAME")
 
+    claim_vectors_conv = layers.Conv2D(output_shape[2] * 16, 1, padding="SAME")(pre_conv()(up_out))
+    claim_vectors = layers.Reshape(output_shape + [8, 2])(claim_vectors_conv)
 
-    claim_vectors_conv = layers.Conv2D(16, 1, padding="SAME")(pre_conv()(up_out))
-    claim_vectors  = layers.Reshape(output_shape + [8, 2])(claim_vectors_conv)
-
-    claim_map = layers.Conv2D(8, 1, padding="SAME")(pre_conv()(up_out))
+    claim_map_conv = layers.Conv2D(output_shape[2] * 8, 1, padding="SAME")(pre_conv()(up_out))
+    claim_map = layers.Reshape(output_shape + [8])(claim_map_conv)
 
     center_of_mass = layers.Conv2D(1, 1, padding="SAME")(pre_conv()(up_out))
 
     return Model(inputs, [claim_vectors, claim_map, center_of_mass], name=name)
 
 
-
-
-
 @gin.configurable(whitelist=["kernel_size", "activation"])
 def res_down(
-    filters:int,
-    kernel_size:int=3,
-    activation:layers.Layer=layers.ReLU,
-    name_prefix:str="",
+    filters: int,
+    kernel_size: int = 3,
+    activation: layers.Layer = layers.ReLU,
+    name_prefix: str = "",
 ) -> LayerFunc:
 
     conv = partial(layers.Conv2D, filters, kernel_size, padding="SAME")
     down_conv_f = lambda i, x: conv(strides=2, name=f"{name_prefix}_DCONV_{i}")(x)
     conv_f = lambda i, x: conv(name=f"{name_prefix}_CONV_{i}")(x)
-
 
     bn_f = lambda i, x: layers.BatchNormalization(name=f"{name_prefix}_BN_{i}")(x)
     activation_f = lambda i, x: activation(name=f"{name_prefix}_ACT_{i}")(x)
@@ -200,7 +230,6 @@ def res_down(
         conv_a_out = conv_f(one_a, act_a_out)
         bn_a2_out = bn_f(two_a, conv_a_out)
 
-
         one_b = "block1b_1"
 
         # x => DownConv2D => [_ + op_result] => Activation
@@ -209,7 +238,6 @@ def res_down(
         act_b_out = activation_f(one_b, add_out)
 
         return act_b_out
-
 
     def block_2(x):
         one_a = "block2a_1"
@@ -222,7 +250,6 @@ def res_down(
         conv_a2_out = conv_f(two_a, act_a_out)
         bn_a2_out = bn_f(two_a, conv_a2_out)
 
-
         one_b = "block2b_1"
 
         # x => [_ + bn_a2_out] => Activation
@@ -231,16 +258,13 @@ def res_down(
 
         return act_b_out
 
-
     return lambda x: block_2(block_1(x))
+
 
 @gin.configurable(whitelist=["activation"])
 def fuse_up(
-    filters: int,
-    activation:layers.Layer=layers.ReLU,
-    name_prefix:str = "",
+    filters: int, activation: layers.Layer = layers.ReLU, name_prefix: str = "",
 ) -> LayerFunc:
-
     def op(x, y):
         if x is None:
             fused = y
@@ -254,6 +278,7 @@ def fuse_up(
 
     return lambda x, y: op(x, y)
 
+
 @gin.configurable(whitelist=["c_prime"])
 class FastAttention(tf.keras.layers.Layer):
     """ Fast Attention Module from:
@@ -266,7 +291,7 @@ class FastAttention(tf.keras.layers.Layer):
         c_prime (int): The number of attention features in q and k
     """
 
-    def __init__(self, c_prime:int=32, **kwargs):
+    def __init__(self, c_prime: int = 32, **kwargs):
         super(FastAttention, self).__init__(**kwargs)
         self.c_prime = c_prime
 
@@ -279,21 +304,21 @@ class FastAttention(tf.keras.layers.Layer):
 
         self.att_bn = tf.keras.layers.BatchNormalization()
 
-        self.kT_v_mul = tf.keras.layers.Dot(axes=(1,1))
-        self.q_kTv_mul = tf.keras.layers.Dot(axes=(2,1))
+        self.kT_v_mul = tf.keras.layers.Dot(axes=(1, 1))
+        self.q_kTv_mul = tf.keras.layers.Dot(axes=(2, 1))
 
         self.qkv_bn = tf.keras.layers.BatchNormalization()
 
         self.residual_add = tf.keras.layers.Add(name="FastAttentionOut")
 
-    def build(self, input_shape): # [None, h, w, c]
+    def build(self, input_shape):  # [None, h, w, c]
         h = w = input_shape[1]
         n = input_shape[1] * input_shape[2]
         c = input_shape[-1]
 
         self.n = tf.constant(n, dtype=tf.float32)
-        self.att_conv = tf.keras.layers.Conv2D(c, 1) # [None, h, w, c]
-        self.v_conv = tf.keras.layers.Conv2D(c, 1) # [None, h, w, c]
+        self.att_conv = tf.keras.layers.Conv2D(c, 1)  # [None, h, w, c]
+        self.v_conv = tf.keras.layers.Conv2D(c, 1)  # [None, h, w, c]
 
         self.flat_q = tf.keras.layers.Reshape([n, self.c_prime])
         self.flat_k = tf.keras.layers.Reshape([n, self.c_prime])
@@ -305,19 +330,23 @@ class FastAttention(tf.keras.layers.Layer):
 
     def call(self, inputs):
 
-        pre_v = self.v_bn(self.v_conv(inputs)) # [None, h, w, c]
+        pre_v = self.v_bn(self.v_conv(inputs))  # [None, h, w, c]
 
-        q = K.l2_normalize(self.flat_q(self.q_bn(self.q_conv(inputs))), axis=-1) # [None, n, c']
-        k = K.l2_normalize(self.flat_k(self.k_bn(self.k_conv(inputs))), axis=-1) # [None, n, c']
-        v = K.relu(self.flat_v(pre_v)) #[None, n, c]
+        q = K.l2_normalize(
+            self.flat_q(self.q_bn(self.q_conv(inputs))), axis=-1
+        )  # [None, n, c']
+        k = K.l2_normalize(
+            self.flat_k(self.k_bn(self.k_conv(inputs))), axis=-1
+        )  # [None, n, c']
+        v = K.relu(self.flat_v(pre_v))  # [None, n, c]
 
-        kTv = self.kT_v_mul([k, v]) # [None, c', c]
-        qkTv = self.q_kTv_mul([q, kTv]) # [None, n, c]
+        kTv = self.kT_v_mul([k, v])  # [None, c', c]
+        qkTv = self.q_kTv_mul([q, kTv])  # [None, n, c]
 
-        square_qkTv = self.square_qkv(qkTv) # [None, h, w, c]
-        qkTv_out = self.qkv_bn(self.qkv_conv(square_qkTv)) #[None, h, w, c]
+        square_qkTv = self.square_qkv(qkTv)  # [None, h, w, c]
+        qkTv_out = self.qkv_bn(self.qkv_conv(square_qkTv))  # [None, h, w, c]
 
-        att_out = self.residual_add([pre_v, qkTv_out]) # [None, h, w, c]
+        att_out = self.residual_add([pre_v, qkTv_out])  # [None, h, w, c]
 
         return att_out
 
@@ -329,77 +358,121 @@ class FastAttention(tf.keras.layers.Layer):
         return dict(list(base_config.items()) + list(config.items()))
 
 
+if __name__ == "__main__":
+
+    def test_encoder():
+        print("VALIDATING ENCODER SHAPE")
+        input_shape = [256, 256, 4]
+        layer_filters = [32, 64, 128, 256]
+
+        enc = encoder(input_shape, layer_filters)
+
+        inputs = np.ones([1, 256, 256, 4], dtype=np.float32)
+        enc_outs = enc(inputs)
+
+        expected_out_shapes = [
+            (1, 128, 128, 32),
+            (1, 64, 64, 64),
+            (1, 32, 32, 128),
+            (1, 16, 16, 256),
+        ]
+
+        for o1, o2 in zip(enc_outs, expected_out_shapes):
+            assert o1.shape == o2
+        print("VALIDATION COMPLETE")
+
+    def test_semantic_decoder():
+        print("VALIDATING SEMANTIC DECODER SHAPE")
+
+        input_shape = [256, 256, 4]
+        layer_filters = [32, 64, 128, 256]
+        enc = encoder(input_shape, layer_filters)
+        inputs = np.ones([1, 256, 256, 4], dtype=np.float32)
+        enc_outs = enc(inputs)
+
+        output_shape = [256, 256]
+
+        sem_dec = semantic_decoder(output_shape, layer_filters, 1)
+
+        semantic_outs = sem_dec(list(reversed(enc_outs)))
+
+        expected_out_shape = (1, 256, 256, 1)
+
+        assert semantic_outs.shape == expected_out_shape
+        print("VALIDATION COMPLETE")
+
+    def test_instance_decoder():
+        # INSTANCE DECODER =========================================================
+        print("VALIDATING INSTANCE DECODER SHAPE")
+
+        input_shape = [256, 256, 4]
+        layer_filters = [32, 64, 128, 256]
+        enc = encoder(input_shape, layer_filters)
+        inputs = np.ones([1, 256, 256, 4], dtype=np.float32)
+        enc_outs = enc(inputs)
 
 
-if __name__=="__main__":
+        output_shape = [256, 256, 4]
 
-    # ENCODER ==================================================================
-    print("VALIDATING ENCODER SHAPE")
-    input_shape = [256, 256, 4]
-    layer_filters = [32, 64, 128, 256]
+        sem_dec = instance_decoder(output_shape, layer_filters,)
 
-    enc = encoder(input_shape, layer_filters)
+        instance_outs = sem_dec(list(reversed(enc_outs)))
 
-    inputs = np.ones([1, 256, 256, 4])
-    enc_outs = enc(inputs)
+        expected_out_shapes = [
+            (1, 256, 256, 4, 8, 2),
+            (1, 256, 256, 4, 8),
+            (1, 256, 256, 1)
+        ]
 
-    expected_out_shapes = [
-        (1, 128, 128, 32),
-        (1, 64, 64, 64),
-        (1, 32, 32, 128),
-        (1, 16, 16, 256)
-    ]
+        for o1, o2 in zip(instance_outs, expected_out_shapes):
+            assert o1.shape == o2
 
-    for o1, o2 in zip(enc_outs, expected_out_shapes):
-        assert o1.shape==o2
-    print("VALIDATION COMPLETE")
-    # ENCODER ==================================================================
+        print("VALIDATION COMPLETE")
+        # INSTANCE DECODER =========================================================
 
-    # SEMANTIC DECODER =========================================================
-    print("VALIDATING SEMANTIC DECODER SHAPE")
-    output_shape = [256, 256]
+    def test_end_to_end():
+        print("VALIDATING END TO END SHAPE")
 
-    sem_dec = semantic_decoder(
-        output_shape,
-        layer_filters,
-        1
-    )
+        input_shape = [256, 256, 4]
+        layer_filters = [32, 64, 128, 256]
 
-    semantic_outs = sem_dec(list(reversed(enc_outs)))
+        enc = encoder(input_shape, layer_filters)
 
-    expected_out_shape = (1, 256, 256, 1)
+        output_shape = [256, 256]
+        sem_dec = semantic_decoder(output_shape, layer_filters, 1)
 
-    assert semantic_outs.shape == expected_out_shape
-    print("VALIDATION COMPLETE")
-    # SEMANTIC DECODER =========================================================
+        output_shape = [256, 256, 4]
+        inst_dec = instance_decoder(output_shape, layer_filters,)
 
 
-    # INSTANCE DECODER =========================================================
-    print("VALIDATING INSTANCE DECODER SHAPE")
-    output_shape = [256, 256]
+        in_tensor = layers.Input(shape=input_shape)
+        enc_outputs = enc(in_tensor)
 
-    sem_dec = instance_decoder(
-        output_shape,
-        layer_filters,
-    )
+        reversed_outputs = list(reversed(enc_outputs))
 
-    instance_outs = sem_dec(list(reversed(enc_outs)))
+        bkg = sem_dec(reversed_outputs)
+        # expected_out_shapes = [(1, 256, 256, b, 8, 2), (1, 256, 256, b, 8), (1, 256, 256, 1)]
+        cv, cm, com = inst_dec(reversed_outputs)
 
-    expected_out_shapes = [
-        (1, 256, 256, 8, 2),
-        (1, 256, 256, 8),
-        (1, 256, 256, 1)
-    ]
+        end_to_end = Model([in_tensor], [bkg, cv, cm, com])
 
-    for o1, o2 in zip(instance_outs, expected_out_shapes):
-        assert o1.shape==o2
+        inputs = np.ones([1, 256, 256, 4], dtype=np.float32)
+        outputs = end_to_end(inputs)
 
-    print("VALIDATION COMPLETE")
-    # INSTANCE DECODER =========================================================
+        expected_out_shapes = [
+            (1, 256, 256, 1),
+            (1, 256, 256, 4, 8, 2),
+            (1, 256, 256, 4, 8),
+            (1, 256, 256, 1)
+        ]
 
+        for o1, o2 in zip(outputs, expected_out_shapes):
+            assert o1.shape == o2, f"{o1.shape}, {o2}"
 
-
-
-
+        print("VALIDATION COMPLETE")
 
 
+    test_encoder()
+    test_semantic_decoder()
+    test_instance_decoder()
+    test_end_to_end()

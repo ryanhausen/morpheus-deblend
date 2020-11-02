@@ -65,13 +65,10 @@ def make_dirs():
         pass
 
 
-def transform_catalog(catalog_fname: str, mask_fname:str):
+def transform_catalog(catalog_fname: str, mask_fname: str):
     header = fits.getheader(mask_fname)
     wcs = WCS(header)
-    catalog_image = np.zeros(
-        [header["NAXIS2"], header["NAXIS1"], 5],
-        dtype=np.float32
-    )
+    catalog_image = np.zeros([header["NAXIS2"], header["NAXIS1"], 5], dtype=np.float32)
 
     with open(catalog_fname, "r") as f:
         lines = f.readlines()
@@ -86,11 +83,12 @@ def transform_catalog(catalog_fname: str, mask_fname:str):
         dec = float(row[cols.index("dec")])
         [[x, y]] = wcs.all_world2pix([[ra, dec]], 0)
 
-
-        morphology_cols = list(map(
-            cols.index,
-            ["spheroid", "disk", "irregular", "ps_compact", "background"]
-        ))
+        morphology_cols = list(
+            map(
+                cols.index,
+                ["spheroid", "disk", "irregular", "ps_compact", "background"],
+            )
+        )
 
         morphology = np.array([float(row[i]) for i in morphology_cols])
 
@@ -107,10 +105,7 @@ def transform_catalog(catalog_fname: str, mask_fname:str):
         pass
 
     out_path = os.path.join(DATA_PATH_PROCESSED, "catalog_data.fits")
-    fits.PrimaryHDU(header=header, data=catalog_image).writeto(
-        out_path,
-        overwrite=True
-    )
+    fits.PrimaryHDU(header=header, data=catalog_image).writeto(out_path, overwrite=True)
 
     return catalog_image
 
@@ -189,7 +184,7 @@ def make_idx_collection(
 
 
 # Center of Mass Label Functions ===============================================
-#https://stackoverflow.com/a/46892763/2691018
+# https://stackoverflow.com/a/46892763/2691018
 def gaussian_kernel_2d(kernlen, std=8):
     """Returns a 2D Gaussian kernel array."""
 
@@ -200,30 +195,23 @@ def gaussian_kernel_2d(kernlen, std=8):
     gkern2d = np.outer(gkern1d, gkern1d)
     return gkern2d
 
+
 # UPDATES 'image' in place
 def insert_gaussian(image, g_kern, y, x) -> None:
     height, width = image.shape
     half_kernel_len = int(g_kern.shape[0] / 2)
 
     def image_slice_f(yx, bound):
-        return slice(
-            max(yx-half_kernel_len, 0),
-            min(yx+half_kernel_len, bound),
-        )
+        return slice(max(yx - half_kernel_len, 0), min(yx + half_kernel_len, bound),)
 
     def kernel_slice_f(yx, bound):
         begin = half_kernel_len - min(
-            half_kernel_len,
-            half_kernel_len-(half_kernel_len-yx)
+            half_kernel_len, half_kernel_len - (half_kernel_len - yx)
         )
 
-        end = half_kernel_len + min(
-            half_kernel_len,
-            bound - yx,
-        )
+        end = half_kernel_len + min(half_kernel_len, bound - yx,)
 
         return slice(begin, end)
-
 
     image_ys = image_slice_f(y, height)
     image_xs = image_slice_f(x, width)
@@ -238,9 +226,7 @@ def insert_gaussian(image, g_kern, y, x) -> None:
 
 
 def build_center_mass_image(
-    source_locations:np.ndarray,
-    gaussian_kernel_len:int,
-    gaussian_kernel_std:int,
+    source_locations: np.ndarray, gaussian_kernel_len: int, gaussian_kernel_std: int,
 ) -> np.ndarray:
     center_of_mass = np.zeros_like(source_locations, dtype=np.float32)
     src_ys, src_xs = np.nonzero(source_locations)
@@ -249,15 +235,18 @@ def build_center_mass_image(
 
     insert_gaussian_f = partial(insert_gaussian, center_of_mass, gaussian_kernel)
 
-    for _ in starmap(insert_gaussian_f, zip(src_ys, src_xs)):pass
+    for _ in starmap(insert_gaussian_f, zip(src_ys, src_xs)):
+        pass
 
     return center_of_mass[:, :, np.newaxis]
+
+
 # ==============================================================================
 # ==============================================================================
 
 
-def crop_convert_and_save( #                   0:4    4:8       8       9:
-    data: np.ndarray, # [height, width, 12] = flux + weights + bkg +  morph(source pixels)
+def crop_convert_and_save(  #                   0:4    4:8       8       9:
+    data: np.ndarray,  # [height, width, 12] = flux + weights + bkg +  morph(source pixels)
     psfs: List[np.ndarray],
     wcs: WCS,
     img_size: int,
@@ -268,31 +257,26 @@ def crop_convert_and_save( #                   0:4    4:8       8       9:
     ys, xs = slice(y, y + img_size), slice(x, x + img_size)
 
     bands = ["h", "j", "v", "z"]
-    flux = np.transpose(data[ys, xs, :4].copy(), axes=(2, 0, 1)) # [b, h, w]
-    weights = np.transpose(data[ys, xs, 4:8].copy(), axes=(2, 0, 1)) # [b, h, w]
-    background = data[ys, xs, 8:9].copy() # [h, w, 1]
-    catalog_data = np.transpose(data[ys, xs, 9:].copy(), axes=(2, 0, 1)) # [h, w, 5]
+    flux = np.transpose(data[ys, xs, :4].copy(), axes=(2, 0, 1))  # [b, h, w]
+    weights = np.transpose(data[ys, xs, 4:8].copy(), axes=(2, 0, 1))  # [b, h, w]
+    background = data[ys, xs, 8:9].copy()  # [h, w, 1]
+    catalog_data = np.transpose(data[ys, xs, 9:].copy(), axes=(2, 0, 1))  # [h, w, 5]
 
     source_locations = (catalog_data[0, :, :] > 0).astype(np.int)
 
     model_psf = scarlet.GaussianPSF(sigma=(0.8,) * 4)
 
     scarlet_src_vals = scarlet_heplper.get_scarlet_fit(
-        bands,
-        psfs,
-        model_psf,
-        flux,
-        weights,
-        catalog_data,
+        bands, psfs, model_psf, flux, weights, catalog_data,
     )
-
 
     center_of_mass = build_center_mass_image(source_locations, 51, 8)
 
-    claim_vector_image, claim_map_image = label_encoder_decoder.get_claim_vector_image_and_map(
-        source_locations,
-        flux.shape,
-        scarlet_src_vals
+    (
+        claim_vector_image,
+        claim_map_image,
+    ) = label_encoder_decoder.get_claim_vector_image_and_map(
+        source_locations, flux.shape, scarlet_src_vals
     )
 
     save_data = [
@@ -300,25 +284,22 @@ def crop_convert_and_save( #                   0:4    4:8       8       9:
         background,
         center_of_mass,
         claim_vector_image,
-        claim_map_image
+        claim_map_image,
     ]
 
-    fname_prefix = lambda s: f"{i}-{y}-{x}-{s}.fits"
-    save_names = list(map(
-        fname_prefix,
-        [
-            "flux",
-            "background",
-            "center_of_mass",
-            "claim_vectors",
-            "claim_maps"
-        ]
-    ))
+    fname_prefix = lambda s: f"{i}-{s}.fits"
+    save_names = list(
+        map(
+            fname_prefix,
+            ["flux", "background", "center_of_mass", "claim_vectors", "claim_maps"],
+        )
+    )
 
     def save_f(name, arr):
         fits.PrimaryHDU(data=arr).writeto(os.path.join(save_dir, name))
 
-    for _ in starmap(save_f, zip(save_names, save_data)):pass
+    for _ in starmap(save_f, zip(save_names, save_data)):
+        pass
 
 
 def get_full_name(fname_key: str) -> str:
@@ -336,7 +317,6 @@ def main(img_size: int) -> None:
     else:
         random.seed(12171988)
 
-
         # CATALOG ==============================================================
         mask_fname = get_full_name("mask")
         data_catalog = transform_catalog(
@@ -344,7 +324,6 @@ def main(img_size: int) -> None:
             os.path.join(DATA_PATH_RAW, mask_fname),
         )
         # CATALOG ==============================================================
-
 
         # BUILD INDEXES ========================================================
         with fits.open(os.path.join(DATA_PATH_RAW, mask_fname)) as mask_hdul:
@@ -365,27 +344,20 @@ def main(img_size: int) -> None:
 
         # PSFs =================================================================
 
-
         def rescale_psf(band):
             arr = rescale(
-                fits.getdata(os.path.join(
-                    DATA_PATH_RAW,
-                    "tinytim",
-                    f"{band}.fits"
-                )),
-                27/73
+                fits.getdata(os.path.join(DATA_PATH_RAW, "tinytim", f"{band}.fits")),
+                27 / 73,
             )
             arr /= arr.sum()
 
-            fits.PrimaryHDU(data=arr).writeto(os.path.join(
-                DATA_PATH_RAW,
-                "tinytim",
-                f"{band}_resized.fits"
-                ),
-                overwrite=True
+            fits.PrimaryHDU(data=arr).writeto(
+                os.path.join(DATA_PATH_RAW, "tinytim", f"{band}_resized.fits"),
+                overwrite=True,
             )
 
-        for _ in map(rescale_psf, ["v", "z"]): pass
+        for _ in map(rescale_psf, ["v", "z"]):
+            pass
 
         fname = lambda b: f"{b}.fits" if b in "hj" else f"{b}_resized.fits"
         psf_path = lambda b: os.path.join(DATA_PATH_RAW, "tinytim", fname(b))
@@ -406,7 +378,6 @@ def main(img_size: int) -> None:
             "background",
         ]
 
-
         data_fnames = [
             os.path.join(DATA_PATH_RAW, get_full_name(fname_key))
             for fname_key in file_keywords
@@ -416,21 +387,25 @@ def main(img_size: int) -> None:
 
         big_array_fname = os.path.join(DATA_PATH_PROCESSED, "combined_array.dat")
         if not os.path.exists(big_array_fname):
-            data = np.memmap(big_array_fname, dtype=np.float32, mode="w+", shape=(25000, 25000, 14))
+            data = np.memmap(
+                big_array_fname, dtype=np.float32, mode="w+", shape=(25000, 25000, 14)
+            )
 
             def update_arr(i):
                 arr = fits.getdata(data_fnames[i])
                 data[:, :, i] = arr[:, :]
                 del arr
-            for _ in map(update_arr, tqdm(range(len(file_keywords)))):pass
+
+            for _ in map(update_arr, tqdm(range(len(file_keywords)))):
+                pass
 
             data[:, :, 9:] = data_catalog[:, :, :]
 
             del data
 
-
-        data = np.memmap(big_array_fname, dtype=np.float32, mode="r", shape=(25000, 25000, 14))
-
+        data = np.memmap(
+            big_array_fname, dtype=np.float32, mode="r", shape=(25000, 25000, 14)
+        )
 
         del data_catalog
 
@@ -440,7 +415,6 @@ def main(img_size: int) -> None:
 
         print("Done opening")
         # FLUX and MORPHOLOGIES ================================================
-
 
         # ======================================================================
         # Data is [height, width,
@@ -460,7 +434,6 @@ def main(img_size: int) -> None:
         print("Getting header")
         header = fits.getheader(data_fnames[0])
         wcs = WCS(header)
-
 
         # TODO: change crop and save, to crop convert and save
         train_crop_f = partial(
