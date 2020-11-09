@@ -146,8 +146,58 @@ def make_idx_collection(
     end_y: int,
     start_x: int,
     end_x: int,
+    train:bool
 ) -> List[int]:
 
+    # FOR CATALOG LOCATIONS ====================================================
+    with open(os.path.join(DATA_PATH_PROCESSED, "interesting_sources"), "r") as f:
+        lines = [l.replace("(", "").replace(")", "").replace("'", "").strip().split(",") for l in f.readlines()[1:]]
+
+    col_id, col_ra, col_dec, col_area, col_morph = 0, 1, 2, 3, 4
+
+    spheroids = list(filter(lambda r: r[col_morph].strip()=="spheroid", lines))
+    disks = list(filter(lambda r: r[col_morph].strip()=="disk", lines))
+    irregulars = list(filter(lambda r: r[col_morph].strip()=="irregular", lines))
+    ps_compacts = list(filter(lambda r: r[col_morph].strip()=="ps_compact", lines))
+
+    train_ratio = 0.8
+
+    def get_split(vals):
+        idx = int(len(vals) * train_ratio)
+        if train:
+            return vals[:idx]
+        else:
+            return vals[idx:]
+
+    # 'mask' is a header now, but used to be array change back in calling
+    # function if using random idxs
+    wcs = WCS(mask)
+    def convert_f(vals):
+        _id, ra, dec = vals[col_id].strip(), vals[col_ra].strip(), vals[col_dec].strip()
+        [[_x, _y]] = wcs.all_world2pix([[float(ra), float(dec)]], 0)
+
+
+        y = int(_y) - img_size//2
+        x = int(_x) - img_size//2
+
+        return (int(_id), (y, x))
+
+    all_srcs = (
+        get_split(spheroids)
+        + get_split(disks)
+        + get_split(irregulars)
+        + get_split(ps_compacts)
+    )
+
+    vals = list(map(convert_f, all_srcs))
+
+    return vals
+    # FOR CATALOG LOCATIONS ====================================================
+
+
+
+
+    # FOR RANDOM SLICES ========================================================
     y_gen = idx_generator(start_y, end_y)
     x_gen = idx_generator(start_x, end_x)
 
@@ -181,6 +231,7 @@ def make_idx_collection(
             valid_count, enumerate(filter(valid_idx_f, zip(y_gen, x_gen)))
         )
     ]
+    # FOR RANDOM SLICES ========================================================
 
 
 # Center of Mass Label Functions ===============================================
@@ -327,17 +378,17 @@ def main(img_size: int) -> None:
 
         # BUILD INDEXES ========================================================
         with fits.open(os.path.join(DATA_PATH_RAW, mask_fname)) as mask_hdul:
-            mask = mask_hdul[0].data  # pylint: disable=no-member
+            mask = mask_hdul[0].header  # pylint: disable=no-member
             val_array = data_catalog  # pylint: disable=no-member
 
             train_ys, train_xs = (11500, 21400), (3800, 19400)
             test_ys, test_xs = (3200, 11500), (3000, 18000)
 
             train_idxs = make_idx_collection(
-                mask, val_array, img_size, NUM_TRAIN_EXAMPLES, *train_ys, *train_xs
+                mask, val_array, img_size, NUM_TRAIN_EXAMPLES, *train_ys, *train_xs, True
             )
             test_idxs = make_idx_collection(
-                mask, val_array, img_size, NUM_TEST_EXAMPLES, *test_ys, *test_xs
+                mask, val_array, img_size, NUM_TEST_EXAMPLES, *test_ys, *test_xs, False
             )
             del mask
         # BUILD INDEXES ========================================================

@@ -38,7 +38,7 @@ def grab_files_py(parent_dir:str, idx:int):
 
     arrays = list(
         map(
-            lambda suffix: fits.getdata(os.path.join(parent_dir, f"{idx}-{suffix}.fits")),
+            lambda suffix: fits.getdata(os.path.join(parent_dir, f"{idx.numpy().decode('UTF-8')}-{suffix}.fits")),
             ["flux", "background", "claim_vectors", "claim_maps", "center_of_mass"]
         )
     )
@@ -79,8 +79,15 @@ def get_dataset(
     options.experimental_optimization.map_vectorization.enabled = True
 
     # Every training sample is composed of 5 files so divide the dir count by 5
-    n_train = len(os.listdir(TRAIN_DATA_PATH)) // 5
-    train_idxs = tf.data.Dataset.from_tensor_slices(tf.range(n_train))
+
+    # n_train = len(os.listdir(TRAIN_DATA_PATH)) // 5
+    # train_idxs = tf.data.Dataset.from_tensor_slices(tf.range(n_train))
+
+    n_train = 5000
+    train_idxs = tf.data.Dataset.from_tensor_slices(
+        ["6203"]
+    ).repeat(n_train)
+
     train_batches_per_epoch = int(np.ceil(n_train / batch_size))
 
     dataset_train = (
@@ -99,8 +106,15 @@ def get_dataset(
     )
 
 
-    n_test = len(os.listdir(TEST_DATA_PATH)) // 5
-    test_idxs = tf.data.Dataset.from_tensor_slices(tf.range(n_test))
+    #n_test = len(os.listdir(TEST_DATA_PATH)) // 5
+    #test_idxs = tf.data.Dataset.from_tensor_slices(tf.range(n_test))
+
+
+    n_test = batch_size * 10
+    test_idxs = tf.data.Dataset.from_tensor_slices(
+        ["67"] # 67 is train item, put it back for actual dataset generation
+    ).repeat(n_test)
+
     test_batches_per_epoch = int(np.ceil(n_test / batch_size))
 
     dataset_test = (

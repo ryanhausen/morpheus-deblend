@@ -18,7 +18,7 @@
 # IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-from typing import Tuple, Union
+from typing import Callable, Tuple, Union
 
 import gin
 import numpy as np
@@ -26,20 +26,22 @@ import tensorflow as tf
 
 TensorLike = Union[tf.Tensor, np.ndarray]
 
-@gin.configurable(whitelist=["loss_object"])
+@gin.configurable(whitelist=["loss_object", "avg"])
 def semantic_loss(
     loss_object:tf.keras.losses.Loss, # use binary crossentropy
+    avg:Callable,
     y:TensorLike, # [n, h, w, 1]
     yh:TensorLike # [n, h, w, 1]
 ) -> float:
 
     loss = loss_object(y, yh) # [n, h, w]
     per_example_loss = tf.math.reduce_mean(loss, axis=(1, 2)) #[n,]
-    return tf.nn.compute_average_loss(per_example_loss) # [0,]
+    return avg(per_example_loss) # [0,]
 
-@gin.configurable(whitelist=["loss_object"])
+@gin.configurable(whitelist=["loss_object", "avg"])
 def claim_vector_loss(
     loss_object: tf.keras.losses.Loss, # use L1
+    avg:Callable,
     bkg:TensorLike, # [n, h, w, 1]
     y:TensorLike, # [n, h, w, b, 8, 2]
     yh:TensorLike, # [n, h, w, b, 8, 2]
@@ -50,11 +52,12 @@ def claim_vector_loss(
     connected_loss = loss_object(y, yh) # [n, h, w, 8]
     per_pixel_loss = tf.math.reduce_sum(connected_loss) * weighting # [n, h, w]
     pre_example_loss = tf.math.reduce_mean(per_pixel_loss, axis=(1, 2)) # [n,]
-    return tf.nn.compute_average_loss(pre_example_loss)
+    return avg(pre_example_loss)
 
-@gin.configurable(whitelist=["loss_object"])
+@gin.configurable(whitelist=["loss_object", "avg"])
 def claim_map_loss(
     loss_object: tf.keras.losses.Loss, # use Categorical crossentrioy
+    avg:Callable,
     bkg:TensorLike, # [n, h, w, 1]
     y:TensorLike, # [n, h, w, b, 8]
     yh:TensorLike # [n, h, w, b, 8]
@@ -67,19 +70,20 @@ def claim_map_loss(
 
     weighted_loss = pixel_loss * weighting # [n, h, w]
     per_example_loss = tf.math.reduce_mean(weighted_loss, axis=(1, 2)) #[n,]
-    return tf.nn.compute_average_loss(per_example_loss) # [0,]
+    return avg(per_example_loss) # [0,]
 
 
-@gin.configurable(whitelist=["loss_object"])
+@gin.configurable(whitelist=["loss_object", "avg"])
 def center_of_mass_loss(
     loss_object: tf.keras.losses.Loss, # use L2 loss
+    avg: Callable,
     y:TensorLike, # [n, h, w, 1]
     yh:TensorLike
 ) -> float:
 
     loss = loss_object(y, yh)
     per_example_loss = tf.math.reduce_mean(loss, axis=(1, 2)) # [n,]
-    return tf.nn.compute_average_loss(per_example_loss) # [0,]
+    return avg(per_example_loss) # [0,]
 
 
 @gin.configurable(whitelist=[

@@ -64,12 +64,6 @@ def training_func(
 ) -> None:
     checkpoint_dir = os.path.join(LOCAL, checkpoint_dir)
 
-    # TODO: This should be stored in figured out somehow
-    if strategy:
-        n_workers = strategy.num_replicas_in_sync
-    else:
-        n_workers = 1
-
     if experiment_key:
         experiment = comet_ml.ExistingExperiment(
             api_key=os.getenv("comet_key"), previous_experiment=experiment_key
@@ -86,6 +80,35 @@ def training_func(
             filename=os.path.join(LOCAL, model_code_file), overwrite=True
         )
         experiment_key = experiment.get_key()
+
+    # TODO: This should be stored in figured out somehow
+    if strategy:
+        with strategy.scope():
+            model = model()
+            optimizer = optimizer()
+            experiment_step = tf.Variable(1)
+            checkpoint = tf.train.Checkpoint(
+                model=model, optimizer=optimizer, experiment_step=experiment_step,
+            )
+            checkpoint_manager = tf.train.CheckpointManager(
+                checkpoint=checkpoint,
+                directory=os.path.join(checkpoint_dir, experiment_key),
+                max_to_keep=3,
+            )
+        n_workers = strategy.num_replicas_in_sync
+    else:
+        model = model()
+        optimizer = optimizer()
+        experiment_step = tf.Variable(1)
+        checkpoint = tf.train.Checkpoint(
+            model=model, optimizer=optimizer, experiment_step=experiment_step,
+        )
+        checkpoint_manager = tf.train.CheckpointManager(
+            checkpoint=checkpoint,
+            directory=os.path.join(checkpoint_dir, experiment_key),
+            max_to_keep=3,
+        )
+        n_workers = 1
 
     experiment_step = tf.Variable(1)
     checkpoint = tf.train.Checkpoint(
@@ -116,9 +139,9 @@ def training_func(
         testing_data = strategy.experimental_distribute_dataset(testing_data)
 
     # Training Functions vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-    train_step = partial(step, model, True, optimizer=optimizer)
+    train_step = partial(step, strategy, model, True, optimizer=optimizer)
     if strategy:
-        train_step_f = lambda idx, inp: strategy.run(train_step, args=(idx, inp))
+        train_step_f = train_step
     else:
         train_step_f = train_step
 
@@ -126,6 +149,8 @@ def training_func(
         post_step,
         experiment,
         experiment_step,
+        strategy,
+        checkpoint_manager.save,
         log_metric_batch_idx,
         True,
         partial(metric_func, experiment, train_batches_per_epoch, True)
@@ -134,9 +159,9 @@ def training_func(
     # Training Functions ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
     # Testing Functions vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-    test_step = partial(step, model, False)
+    test_step = partial(step, strategy, model, False)
     if strategy:
-        test_step_f = lambda idx, inp: strategy.run(test_step, args=(idx, inp))
+        test_step_f = test_step
     else:
         test_step_f = test_step
 
@@ -144,6 +169,8 @@ def training_func(
         post_step,
         experiment,
         experiment_step,
+        strategy,
+        lambda :None,
         log_metric_batch_idx, # is ignored when train==False
         False,
         partial(metric_func, experiment, test_batches_per_epoch, False)
@@ -195,8 +222,34 @@ def training_func(
         pass
 
 
-@gin.configurable(whitelist=["loss_func", "optimizer"])
+@tf.function
+def execute_step(
+    model:tf.keras.models.Model,
+    inputs:Tuple[
+        tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor
+    ],  # flux, bkg, claim_v, claim_m, com
+    loss_func: Callable,
+    is_training:bool,
+    optimizer: tf.keras.optimizers.Optimizer = None
+) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
+
+    flux = inputs[0]
+
+    if is_training:
+        with tf.GradientTape() as tape:
+            outputs = model(flux, training=is_training)
+            loss = loss_func(inputs=inputs, outputs=outputs)
+
+        grads = tape.gradient(loss, model.trainable_variables)
+        optimizer.apply_gradients(zip(grads, model.trainable_variables))
+    else:
+        outputs = model(flux, training=is_training)
+
+    return outputs
+
+@gin.configurable(whitelist=["loss_func"])
 def step(
+    strategy:tf.distribute.Strategy,
     model: tf.keras.models.Model,
     is_training: bool,
     batch_idx: int,
@@ -210,17 +263,10 @@ def step(
     Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor],  # inputs
     Tuple[tf.Tensor, tf.Tensor, tf.Tensor],  # model outputs: bkg, claim_v, claim_m, com
 ]:
-    flux = inputs[0]
-
-    if is_training:
-        with tf.GradientTape() as tape:
-            outputs = model(flux, training=is_training)
-            loss = loss_func(inputs=inputs, outputs=outputs)
-
-        grads = tape.gradient(loss, model.trainable_variables)
-        optimizer.apply_gradients(zip(grads, model.trainable_variables))
+    if strategy:
+        outputs = strategy.run(execute_step, args=(model, inputs, loss_func, is_training, optimizer))
     else:
-        outputs = model(flux, training=is_training)
+        outputs = execute_step(model, inputs, loss_func, is_training, optimizer)
 
     return (batch_idx, inputs, outputs)
 
@@ -228,6 +274,8 @@ def step(
 def post_step(
     experiment,
     experiment_step: tf.Variable,
+    strategy: tf.distribute.Strategy,
+    save_f:Callable,
     log_batch_idx:int,
     is_training: bool,
     metric_func: Callable,
@@ -245,6 +293,13 @@ def post_step(
         should_log = True
 
     if should_log:
+
+        if strategy:
+            inputs = [tf.concat(i.values, axis=0) for i in inputs]
+            outputs = [tf.concat(o.values, axis=0) for o in outputs]
+
+
+        experiment.set_step(experiment_step.numpy())
         with context():
             metric_func(
                 batch_idx,
@@ -252,25 +307,23 @@ def post_step(
                 outputs
             )
 
+            save_f()
+
     return batch_idx
 
 
 def main(config_file: str):
-    # strategy = tf.distribute.MirroredStrategy()
-    strategy = None
+    strategy = tf.distribute.MirroredStrategy()
+    # strategy = None
 
     gin.config.external_configurable(tf.keras.losses.BinaryCrossentropy, module='tf.keras.losses')
     gin.config.external_configurable(tf.keras.losses.CategoricalCrossentropy, module='tf.keras.losses')
     gin.config.external_configurable(tf.keras.losses.MeanAbsoluteError, module='tf.keras.losses')
     gin.config.external_configurable(tf.keras.losses.MeanSquaredError, module='tf.keras.losses')
+    gin.config.external_configurable(tf.nn.compute_average_loss, "tf.nn.compute_average_loss")
 
-    if strategy:
-        with strategy.scope():
-            gin.parse_config_file(os.path.join(LOCAL, config_file))
-            training_func(strategy=strategy)  # pylint: disable=no-value-for-parameter
-    else:
-        gin.parse_config_file(os.path.join(LOCAL, config_file))
-        training_func(strategy=strategy)  # pylint: disable=no-value-for-parameter
+    gin.parse_config_file(os.path.join(LOCAL, config_file))
+    training_func(strategy=strategy)  # pylint: disable=no-value-for-parameter
 
 
 if __name__ == "__main__":

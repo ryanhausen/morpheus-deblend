@@ -43,20 +43,30 @@ tf.keras.losses.MeanSquaredError.reduction = "none"
 # src.features.data_provider.augment.flip_x = False
 # src.features.data_provider.augment.normalize = False
 
-src.features.data_provider.get_dataset.batch_size = 16
+src.features.data_provider.get_dataset.batch_size = 32
 # src.features.data_provider ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
 # src.models.losses vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+tf.nn.compute_average_loss.global_batch_size = 32
+
 src.models.losses.semantic_loss.loss_object = @tf.keras.losses.BinaryCrossentropy()
+src.models.losses.semantic_loss.avg = @tf.nn.compute_average_loss
+
 src.models.losses.claim_vector_loss.loss_object = @tf.keras.losses.MeanAbsoluteError()
+src.models.losses.claim_vector_loss.avg = @tf.nn.compute_average_loss
+
 src.models.losses.claim_map_loss.loss_object = @tf.keras.losses.CategoricalCrossentropy()
+src.models.losses.claim_map_loss.avg = @tf.nn.compute_average_loss
+
 src.models.losses.center_of_mass_loss.loss_object = @tf.keras.losses.MeanSquaredError()
+src.models.losses.center_of_mass_loss.avg = @tf.nn.compute_average_loss
 
 src.models.losses.loss_function.lambda_semantic = 1
 src.models.losses.loss_function.lambda_claim_vector = 1
 src.models.losses.loss_function.lambda_claim_map = 1
 src.models.losses.loss_function.lambda_center_of_mass = 1
+
 # src.models.losses ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 # !!!!!!!!!!!!!!! The above and below lambda values should match !!!!!!!!!!!!!!!
@@ -85,16 +95,15 @@ src.models.PanopticFastAttention.instance_decoder.filters = [32, 64, 128, 256]
 
 
 # src.models.train_model vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-__main__.training_func.model = @src.models.PanopticFastAttention.get_model()
-__main__.training_func.optimizer = @tf.keras.optimizers.Adam()
+__main__.training_func.model = @src.models.PanopticFastAttention.get_model
+__main__.training_func.optimizer = @tf.keras.optimizers.Adam
 __main__.training_func.metric_func = @src.models.metric_logging.update_metrics
 __main__.training_func.checkpoint_dir = "../../models"
-__main__.training_func.epochs = 2
-__main__.training_func.log_metric_batch_idx = 10
+__main__.training_func.epochs = 100
+__main__.training_func.log_metric_batch_idx = 100
 __main__.training_func.model_code_file = "PanopticFastAttention.py"
-__main__.training_func.comet_disabled = True
+__main__.training_func.comet_disabled = False
 __main__.training_func.experiment_project_name = "morpheus-deblend"
 __main__.training_func.experiment_key = None
 
 __main__.step.loss_func = @src.models.losses.loss_function
-__main__.step.optimizer = @tf.keras.optimizers.Adam()
