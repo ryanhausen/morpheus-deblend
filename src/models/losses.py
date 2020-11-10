@@ -50,7 +50,7 @@ def claim_vector_loss(
     weighting = tf.math.abs(bkg[:, :, :, 0] - 1) # [n, h, w]
 
     connected_loss = loss_object(y, yh) # [n, h, w, 8]
-    per_pixel_loss = tf.math.reduce_sum(connected_loss) * weighting # [n, h, w]
+    per_pixel_loss = tf.math.reduce_mean(connected_loss) * weighting # [n, h, w]
     pre_example_loss = tf.math.reduce_mean(per_pixel_loss, axis=(1, 2)) # [n,]
     return avg(pre_example_loss)
 

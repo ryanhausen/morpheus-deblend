@@ -79,6 +79,36 @@ def update_metrics(
 
         for _ in starmap(experiment.log_metric, metrics):
             pass
+
+        experiment.log_image(
+            y_bkg[-1,...],
+            "InputBackground",
+            image_colormap="Greys",
+            image_minmax=(0, 1)
+        )
+
+        experiment.log_image(
+            yh_bkg[-1,...],
+            "OutputBackground",
+            image_colormap="Greys",
+            image_minmax=(0, 1)
+        )
+
+
+        experiment.log_image(
+            y_com[-1,...],
+            "InputCenterOfMass",
+            image_colormap="Greys",
+            image_minmax=(0, 1)
+        )
+
+        experiment.log_image(
+            yh_com[-1,...],
+            "OutputCenterOfMass",
+            image_colormap="Greys",
+            image_minmax=(0, 1)
+        )
+
     else:
 
         _semantic_loss.update_state(l_semantic * lambda_semantic)
@@ -102,5 +132,36 @@ def update_metrics(
 
             for _ in starmap(send_and_reset, metrics):
                 pass
+
+
+            experiment.log_image(
+                y_bkg[-1,...],
+                "InputBackground",
+                image_colormap="Greys",
+                image_minmax=(0, 1)
+            )
+
+            experiment.log_image(
+                yh_bkg[-1,...],
+                "OutputBackground",
+                image_colormap="Greys",
+                image_minmax=(0, 1)
+            )
+
+
+            experiment.log_image(
+                y_com[-1,...],
+                "InputCenterOfMass",
+                image_colormap="Greys",
+                image_minmax=(0, 1)
+            )
+
+            experiment.log_image(
+                yh_com[-1,...],
+                "OutputCenterOfMass",
+                image_colormap="Greys",
+                image_minmax=(0, 1)
+            )
+
 
 

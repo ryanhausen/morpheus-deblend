@@ -55,7 +55,6 @@ def get_model(input_shape = List[int]) -> Model:
     reversed_outputs = list(reversed(enc_outputs))
 
     bkg = dec_semantic(reversed_outputs)
-    # expected_out_shapes = [(1, 256, 256, 8, 2), (1, 256, 256, 8), (1, 256, 256, 1)]
     cv, cm, com = dec_intance(reversed_outputs)
 
     return Model([inputs], [bkg, cv, cm, com])
@@ -198,7 +197,11 @@ def instance_decoder(
     claim_map_conv = layers.Conv2D(output_shape[2] * 8, 1, padding="SAME")(pre_conv()(up_out))
     claim_map = layers.Reshape(output_shape + [8])(claim_map_conv)
 
-    center_of_mass = layers.Conv2D(1, 1, padding="SAME")(pre_conv()(up_out))
+    center_of_mass = layers.Conv2D(
+        1, 1,
+        padding="SAME",
+        activation="sigmoid"
+        )(pre_conv()(up_out))
 
     return Model(inputs, [claim_vectors, claim_map, center_of_mass], name=name)
 
@@ -354,7 +357,7 @@ class FastAttention(tf.keras.layers.Layer):
     # https://github.com/tensorflow/tensorflow/blob/fcc4b966f1265f466e82617020af93670141b009/tensorflow/python/keras/layers/dense_attention.py#L483
     def get_config(self):
         config = dict(c_prime=self.c_prime)
-        base_config = super(tf.keras.layers.Layer, self).get_config()
+        base_config = super(FastAttention, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
 
@@ -451,7 +454,6 @@ if __name__ == "__main__":
         reversed_outputs = list(reversed(enc_outputs))
 
         bkg = sem_dec(reversed_outputs)
-        # expected_out_shapes = [(1, 256, 256, b, 8, 2), (1, 256, 256, b, 8), (1, 256, 256, 1)]
         cv, cm, com = inst_dec(reversed_outputs)
 
         end_to_end = Model([in_tensor], [bkg, cv, cm, com])

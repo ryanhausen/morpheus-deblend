@@ -24,9 +24,6 @@ from functools import partial
 from typing import List, Tuple
 
 import numpy as np
-from numpy.core.defchararray import startswith
-from numpy.core.fromnumeric import prod
-
 
 def get_claim_vector_image_and_map(
     source_locations: np.ndarray,

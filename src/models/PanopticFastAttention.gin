@@ -62,20 +62,20 @@ src.models.losses.claim_map_loss.avg = @tf.nn.compute_average_loss
 src.models.losses.center_of_mass_loss.loss_object = @tf.keras.losses.MeanSquaredError()
 src.models.losses.center_of_mass_loss.avg = @tf.nn.compute_average_loss
 
-src.models.losses.loss_function.lambda_semantic = 1
-src.models.losses.loss_function.lambda_claim_vector = 1
+src.models.losses.loss_function.lambda_semantic = 10
+src.models.losses.loss_function.lambda_claim_vector = .000001
 src.models.losses.loss_function.lambda_claim_map = 1
-src.models.losses.loss_function.lambda_center_of_mass = 1
+src.models.losses.loss_function.lambda_center_of_mass = 100
 
 # src.models.losses ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 # !!!!!!!!!!!!!!! The above and below lambda values should match !!!!!!!!!!!!!!!
 
 # src.models.metric_logging vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-src.models.metric_logging.update_metrics.lambda_semantic = 1
-src.models.metric_logging.update_metrics.lambda_claim_vector = 1
+src.models.metric_logging.update_metrics.lambda_semantic = 10
+src.models.metric_logging.update_metrics.lambda_claim_vector = .000001
 src.models.metric_logging.update_metrics.lambda_claim_map = 1
-src.models.metric_logging.update_metrics.lambda_center_of_mass = 1
+src.models.metric_logging.update_metrics.lambda_center_of_mass = 100
 # src.models.metric_logging ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
@@ -99,7 +99,7 @@ __main__.training_func.model = @src.models.PanopticFastAttention.get_model
 __main__.training_func.optimizer = @tf.keras.optimizers.Adam
 __main__.training_func.metric_func = @src.models.metric_logging.update_metrics
 __main__.training_func.checkpoint_dir = "../../models"
-__main__.training_func.epochs = 100
+__main__.training_func.epochs = 1000
 __main__.training_func.log_metric_batch_idx = 100
 __main__.training_func.model_code_file = "PanopticFastAttention.py"
 __main__.training_func.comet_disabled = False
