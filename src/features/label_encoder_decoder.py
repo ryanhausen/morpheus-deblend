@@ -25,6 +25,81 @@ from typing import List, Tuple
 
 import numpy as np
 
+def get_claim_map(
+    n:int,
+    source_locations: np.ndarray,
+    bhw: Tuple[int, int, int],
+    model_src_vals: List[np.ndarray],
+) -> np.ndarray:
+
+    def get_n_closest_sources_encode(
+        n:int,                                  # max number of sources to include
+        source_locations:np.ndarray,            # locations of sources as an array of y,x idxs
+        ij:Tuple[int,int],                      # the index to retrieve the sources for
+    ) -> Tuple[List[int], Tuple[int, int]]:     # The n sources ordered by proximity idxs and the idx ij
+        distances = np.linalg.norm(source_locations-np.array(ij), axis=1)
+        closest_n_sources = np.argsort(distances)[:n]
+
+        return (closest_n_sources, ij)
+
+
+    def get_src_flx(
+        scarlet_data:List[np.ndarray],                  # SCARLET data
+        src_idxs:List[int],                             # idx of source in the SCARLET output
+        ij:Tuple[List[np.ndarray], Tuple[int, int]],    # idx in image space
+    ) -> np.ndarray:                                    # the source value at i,j in each of the bands
+        i, j = ij
+        # each element in this list is an array of the flux
+        # values that belong to each source
+        # [n, b, 1, 1]
+        src_flux_values = np.array([scarlet_data[src_idx][:, i, j] for src_idx in src_idxs])
+
+        return (src_flux_values, ij)
+
+
+    def update_image(
+        output_array:np.ndarray,        # [h, w, b, n]
+        normed_flux_vals:np.ndarray,    # [n, b]
+        ij:Tuple[int, int],             # pixel location
+    ) -> None:
+        i, j = ij
+        output_array[i, j, ...] = normed_flux_vals.T[:]
+
+
+    def normed_combined_flux(
+        src_flux_values:np.ndarray, # [n, bands]
+        ij:Tuple[int, int]
+    ) -> Tuple[List[np.ndarray], Tuple[int, int]]:
+
+        # restrict flux to positive values
+        src_flux_cmb = np.clip(np.array(src_flux_values), a_min=0, a_max=None) # [n, b]
+        flux_norm = src_flux_cmb.sum(axis=0) # [b,] total flux for each band
+
+        normed = src_flux_cmb / flux_norm
+        normed[np.isnan(normed)] = 1 / src_flux_cmb.shape[0]
+
+        return (normed, ij)
+
+
+    out_shape = list(model_src_vals[0].shape[1:]) + [model_src_vals[0].shape[0], n]
+    output_array = np.zeros(out_shape, dtype=np.float32)
+
+
+    get_n_src_f = partial(get_n_closest_sources_encode, n, source_locations)
+    get_src_flx_f = partial(get_src_flx, model_src_vals)
+    update_output_f = partial(update_image, output_array)
+
+    img_shape = model_src_vals[0].shape[1:]
+    idxs = product(range(img_shape[0]), range(img_shape[1]))
+    n_srcs_per_pixel = map(get_n_src_f, idxs)
+    src_flx_per_pixel = starmap(get_src_flx_f, n_srcs_per_pixel)
+    normed_src_flx_per_pixel = starmap(normed_combined_flux, src_flx_per_pixel)
+
+    for _ in starmap(update_output_f, normed_src_flx_per_pixel):pass
+
+    return output_array
+
+
 def get_claim_vector_image_and_map(
     source_locations: np.ndarray,
     bhw: Tuple[int, int, int],

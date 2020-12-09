@@ -31,9 +31,7 @@ import numpy as np
 import scarlet
 import scarlet.psf as psf
 from astropy.io import fits
-from astropy.nddata.utils import Cutout2D
 from astropy.wcs import WCS
-from scarlet import morphology, observation
 from scipy import signal
 from skimage.transform import rescale, resize
 from tqdm import tqdm
@@ -323,18 +321,25 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
 
     center_of_mass = build_center_mass_image(source_locations, 51, 8)
 
-    (
-        claim_vector_image,
-        claim_map_image,
-    ) = label_encoder_decoder.get_claim_vector_image_and_map(
-        source_locations, flux.shape, scarlet_src_vals
-    )
+    # (
+    #     claim_vector_image,
+    #     claim_map_image,
+    # ) = label_encoder_decoder.get_claim_vector_image_and_map(
+    #     source_locations, flux.shape, scarlet_src_vals
+    # )
+
+    claim_map_image = label_encoder_decoder.get_claim_map(
+        5,
+        source_locations,
+        flux.shape,
+        scarlet_src_vals
+    ) # [h, w, b, n]
 
     save_data = [
         np.transpose(flux, axes=(1, 2, 0)),
         background,
         center_of_mass,
-        claim_vector_image,
+        # claim_vector_image,
         claim_map_image,
     ]
 
@@ -342,7 +347,7 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
     save_names = list(
         map(
             fname_prefix,
-            ["flux", "background", "center_of_mass", "claim_vectors", "claim_maps"],
+            ["flux", "background", "center_of_mass", "claim_maps"],
         )
     )
 
