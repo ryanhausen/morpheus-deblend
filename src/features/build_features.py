@@ -31,9 +31,7 @@ import numpy as np
 import scarlet
 import scarlet.psf as psf
 from astropy.io import fits
-from astropy.nddata.utils import Cutout2D
 from astropy.wcs import WCS
-from scarlet import morphology, observation
 from scipy import signal
 from skimage.transform import rescale, resize
 from tqdm import tqdm

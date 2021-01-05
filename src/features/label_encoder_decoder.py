@@ -25,7 +25,6 @@ from typing import List, Tuple
 
 import numpy as np
 
-
 def get_claim_map(
     n:int,
     source_locations: np.ndarray,
