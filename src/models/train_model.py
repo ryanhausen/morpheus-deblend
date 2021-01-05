@@ -313,8 +313,8 @@ def post_step(
 
 
 def main(config_file: str):
-    strategy = tf.distribute.MirroredStrategy()
-    # strategy = None
+    #strategy = tf.distribute.MirroredStrategy()
+    strategy = None
 
     gin.config.external_configurable(tf.keras.losses.BinaryCrossentropy, module='tf.keras.losses')
     gin.config.external_configurable(tf.keras.losses.CategoricalCrossentropy, module='tf.keras.losses')

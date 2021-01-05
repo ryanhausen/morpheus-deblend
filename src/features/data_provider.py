@@ -39,7 +39,8 @@ def grab_files_py(parent_dir:str, idx:int):
     arrays = list(
         map(
             lambda suffix: fits.getdata(os.path.join(parent_dir, f"{idx.numpy().decode('UTF-8')}-{suffix}.fits")),
-            ["flux", "background", "claim_vectors", "claim_maps", "center_of_mass"]
+            #v1 ["flux", "background", "claim_vectors", "claim_maps", "center_of_mass"]
+            ["flux", "background", "claim_maps", "center_of_mass"]
         )
     )
 
@@ -48,23 +49,26 @@ def grab_files_py(parent_dir:str, idx:int):
 
 def get_files(parent_dir:str, item_idx:tf.data.Dataset):
 
-    flux, background, claim_vector, claim_map, center_of_mass = tf.py_function(
+    #flux, background, claim_vector, claim_map, center_of_mass = tf.py_function(
+    flux, background, claim_map, center_of_mass = tf.py_function(
         partial(grab_files_py, parent_dir),
         inp=[item_idx],
-        Tout=(tf.float32, tf.float32, tf.float32, tf.float32, tf.float32)
+        #Tout=(tf.float32, tf.float32, tf.float32, tf.float32, tf.float32)
+        Tout=(tf.float32, tf.float32, tf.float32, tf.float32)
     )
-
+    n = 5
     flux.set_shape([256, 256, 4])
     background.set_shape([256, 256, 1])
-    claim_vector.set_shape([256, 256, 4, 8, 2])
-    claim_map.set_shape([256, 256, 4, 8])
+    #claim_vector.set_shape([256, 256, 4, 8, 2])
+    #claim_map.set_shape([256, 256, 4, 8])
+    claim_map.set_shape([256, 256, 4, n])
     center_of_mass.set_shape([256, 256, 1])
 
 
     return tf.data.Dataset.from_tensors((
         flux,
         background,
-        claim_vector,
+        #claim_vector,
         claim_map,
         center_of_mass,
     ))
@@ -75,18 +79,22 @@ def get_dataset(
     batch_size:int
 ) -> Tuple[Tuple[tf.data.Dataset, int], Tuple[tf.data.Dataset, int]]:
 
+    def get_idxs(directory:str):
+        return list(set([f.split("-")[0] for f in os.listdir(directory)]))
+
     options = tf.data.Options()
     options.experimental_optimization.map_vectorization.enabled = True
 
     # Every training sample is composed of 5 files so divide the dir count by 5
 
-    # n_train = len(os.listdir(TRAIN_DATA_PATH)) // 5
-    # train_idxs = tf.data.Dataset.from_tensor_slices(tf.range(n_train))
+    train_idxs = get_idxs(TRAIN_DATA_PATH)
+    n_train = len(train_idxs)
+    train_idxs = tf.data.Dataset.from_tensor_slices(train_idxs)
 
-    n_train = 5000
-    train_idxs = tf.data.Dataset.from_tensor_slices(
-        ["6203"]
-    ).repeat(n_train)
+    # n_train = 5000
+    # train_idxs = tf.data.Dataset.from_tensor_slices(
+    #     ["6203"]
+    # ).repeat(n_train)
 
     train_batches_per_epoch = int(np.ceil(n_train / batch_size))
 
@@ -95,7 +103,7 @@ def get_dataset(
             partial(get_files, TRAIN_DATA_PATH),
             cycle_length=batch_size,  # number of files to process in parallel
             block_length=1,  # how many items to produce from a single file
-            num_parallel_calls=tf.data.experimental.AUTOTUNE,
+            num_parallel_calls=5,
         )
         .with_options(options)
         .repeat()
@@ -105,15 +113,15 @@ def get_dataset(
         .batch(batch_size)
     )
 
+    test_idxs = get_idxs(TEST_DATA_PATH)
+    n_test = len(test_idxs)
+    test_idxs = tf.data.Dataset.from_tensor_slices(test_idxs)
 
-    #n_test = len(os.listdir(TEST_DATA_PATH)) // 5
-    #test_idxs = tf.data.Dataset.from_tensor_slices(tf.range(n_test))
 
-
-    n_test = batch_size * 10
-    test_idxs = tf.data.Dataset.from_tensor_slices(
-        ["67"] # 67 is train item, put it back for actual dataset generation
-    ).repeat(n_test)
+    # n_test = batch_size * 10
+    # test_idxs = tf.data.Dataset.from_tensor_slices(
+    #     ["67"] # 67 is train item, put it back for actual dataset generation
+    # ).repeat(n_test)
 
     test_batches_per_epoch = int(np.ceil(n_test / batch_size))
 
@@ -122,7 +130,7 @@ def get_dataset(
             partial(get_files, TEST_DATA_PATH),
             cycle_length=batch_size,  # number of files to process in parallel
             block_length=1,  # how many items to produce from a single file
-            num_parallel_calls=tf.data.experimental.AUTOTUNE,
+            num_parallel_calls=5,
         )
         .with_options(options)
         .repeat()

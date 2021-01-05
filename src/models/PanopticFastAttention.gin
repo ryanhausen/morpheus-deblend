@@ -27,7 +27,7 @@ import src.models.train_model
 
 # tensorflow vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 # tf.keras.losses_utils.ReductionV2.NONE == "none"
-tf.keras.optimizers.Adam.learning_rate = 0.0001
+tf.keras.optimizers.Adam.learning_rate = 0.000001
 tf.keras.losses.BinaryCrossentropy.from_logits = True
 tf.keras.losses.BinaryCrossentropy.reduction = "none"
 tf.keras.losses.CategoricalCrossentropy.from_logits = True
@@ -43,12 +43,12 @@ tf.keras.losses.MeanSquaredError.reduction = "none"
 # src.features.data_provider.augment.flip_x = False
 # src.features.data_provider.augment.normalize = False
 
-src.features.data_provider.get_dataset.batch_size = 32
+src.features.data_provider.get_dataset.batch_size = 16
 # src.features.data_provider ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
 # src.models.losses vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-tf.nn.compute_average_loss.global_batch_size = 32
+tf.nn.compute_average_loss.global_batch_size = 16
 
 src.models.losses.semantic_loss.loss_object = @tf.keras.losses.BinaryCrossentropy()
 src.models.losses.semantic_loss.avg = @tf.nn.compute_average_loss
@@ -63,9 +63,10 @@ src.models.losses.center_of_mass_loss.loss_object = @tf.keras.losses.MeanSquared
 src.models.losses.center_of_mass_loss.avg = @tf.nn.compute_average_loss
 
 src.models.losses.loss_function.lambda_semantic = 10
-src.models.losses.loss_function.lambda_claim_vector = .000001
+src.models.losses.loss_function.lambda_claim_vector = 0.1
 src.models.losses.loss_function.lambda_claim_map = 1
 src.models.losses.loss_function.lambda_center_of_mass = 100
+src.models.losses.loss_function.instance_mode = "v2"
 
 # src.models.losses ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -73,14 +74,16 @@ src.models.losses.loss_function.lambda_center_of_mass = 100
 
 # src.models.metric_logging vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 src.models.metric_logging.update_metrics.lambda_semantic = 10
-src.models.metric_logging.update_metrics.lambda_claim_vector = .000001
+src.models.metric_logging.update_metrics.lambda_claim_vector = 0.1
 src.models.metric_logging.update_metrics.lambda_claim_map = 1
 src.models.metric_logging.update_metrics.lambda_center_of_mass = 100
+src.models.metric_logging.update_metrics.instance_mode = "v2"
 # src.models.metric_logging ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
 # src.models.PanopticFastAttention vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 src.models.PanopticFastAttention.get_model.input_shape = [256, 256, 4]
+src.models.PanopticFastAttention.get_model.instance_mode = "v2"
 
 src.models.PanopticFastAttention.encoder.input_shape = [256, 256, 4]
 src.models.PanopticFastAttention.encoder.filters = [32, 64, 128, 256]
@@ -91,6 +94,10 @@ src.models.PanopticFastAttention.semantic_decoder.n_classes = 1
 
 src.models.PanopticFastAttention.instance_decoder.output_shape = [256, 256, 4]
 src.models.PanopticFastAttention.instance_decoder.filters = [32, 64, 128, 256]
+
+src.models.PanopticFastAttention.instance_decoder_v2.output_shape = [256, 256, 4]
+src.models.PanopticFastAttention.instance_decoder_v2.filters = [32, 64, 128, 256]
+src.models.PanopticFastAttention.instance_decoder_v2.n = 5
 # src.models.PanopticFastAttention ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
@@ -99,11 +106,11 @@ __main__.training_func.model = @src.models.PanopticFastAttention.get_model
 __main__.training_func.optimizer = @tf.keras.optimizers.Adam
 __main__.training_func.metric_func = @src.models.metric_logging.update_metrics
 __main__.training_func.checkpoint_dir = "../../models"
-__main__.training_func.epochs = 1000
-__main__.training_func.log_metric_batch_idx = 100
+__main__.training_func.epochs = 2000
+__main__.training_func.log_metric_batch_idx = 10
 __main__.training_func.model_code_file = "PanopticFastAttention.py"
 __main__.training_func.comet_disabled = False
 __main__.training_func.experiment_project_name = "morpheus-deblend"
-__main__.training_func.experiment_key = None
+__main__.training_func.experiment_key = "ecec9764de0e4c7ba86688d0865fdb43"
 
 __main__.step.loss_func = @src.models.losses.loss_function

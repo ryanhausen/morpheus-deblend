@@ -43,6 +43,7 @@ import src.features.label_encoder_decoder as label_encoder_decoder
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "../../data")
 DATA_PATH_PROCESSED = os.path.join(DATA_PATH, "processed")
+DATA_PATH_PROCESSED_SCARLET = os.path.join(DATA_PATH_PROCESSED, "scarlet")
 DATA_PATH_PROCESSED_TRAIN = os.path.join(DATA_PATH_PROCESSED, "train")
 DATA_PATH_PROCESSED_TEST = os.path.join(DATA_PATH_PROCESSED, "test")
 DATA_PATH_RAW = os.path.join(DATA_PATH, "raw")
@@ -317,24 +318,41 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
 
     model_psf = scarlet.GaussianPSF(sigma=(0.8,) * 4)
 
-    scarlet_src_vals = scarlet_heplper.get_scarlet_fit(
-        bands, psfs, model_psf, flux, weights, catalog_data,
-    )
+    scarlet_file_path = os.path.join(DATA_PATH_PROCESSED_SCARLET, f"{i}.fits")
+    if os.path.exists(scarlet_file_path):
+        scarlet_src_vals = [arr for arr in fits.getdata(scarlet_file_path)]
+    else:
+        scarlet_src_vals = scarlet_heplper.get_scarlet_fit(
+            bands, psfs, model_psf, flux, weights, catalog_data,
+        )
+
+        fits.PrimaryHDU(data=np.array(scarlet_src_vals)).writeto(scarlet_file_path)
 
     center_of_mass = build_center_mass_image(source_locations, 51, 8)
 
-    (
-        claim_vector_image,
-        claim_map_image,
-    ) = label_encoder_decoder.get_claim_vector_image_and_map(
-        source_locations, flux.shape, scarlet_src_vals
-    )
+    ys, xs = np.nonzero(source_locations)
+    source_idxs = np.array(list(zip(ys, xs)))
+
+    claim_map_image = label_encoder_decoder.get_claim_map(
+        5,
+        source_idxs,
+        flux.shape,
+        scarlet_src_vals
+    ) # [h, w, b, n]
+
+
+    # (
+    #     claim_vector_image,
+    #     claim_map_image,
+    # ) = label_encoder_decoder.get_claim_vector_image_and_map(
+    #     source_locations, background, flux.shape, scarlet_src_vals
+    # )
 
     save_data = [
         np.transpose(flux, axes=(1, 2, 0)),
         background,
         center_of_mass,
-        claim_vector_image,
+        # claim_vector_image,
         claim_map_image,
     ]
 
@@ -342,7 +360,13 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
     save_names = list(
         map(
             fname_prefix,
-            ["flux", "background", "center_of_mass", "claim_vectors", "claim_maps"],
+            [
+                "flux",
+                "background",
+                "center_of_mass",
+                #"claim_vectors",
+                "claim_maps"
+            ],
         )
     )
 

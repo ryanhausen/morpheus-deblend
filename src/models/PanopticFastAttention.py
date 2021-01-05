@@ -43,21 +43,27 @@ LayerFunc = Callable[[tf.Tensor], tf.Tensor]
 Tensorlike = Union[tf.Tensor, np.ndarray]
 
 @gin.configurable()
-def get_model(input_shape = List[int]) -> Model:
+def get_model(input_shape = List[int], instance_mode:str = "v1") -> Model:
 
     inputs = layers.Input(shape=input_shape)
 
     enc = encoder()
     dec_semantic = semantic_decoder()
-    dec_intance = instance_decoder()
+
+    if instance_mode=="v1":
+        dec_instance = instance_decoder()
+    elif instance_mode=="v2":
+        dec_instance = instance_decoder_v2()
+    else:
+        raise ValueError("Instance mode should be 'v1' or 'v2'")
 
     enc_outputs = enc(inputs)
     reversed_outputs = list(reversed(enc_outputs))
 
     bkg = dec_semantic(reversed_outputs)
-    cv, cm, com = dec_intance(reversed_outputs)
+    instance = dec_instance(reversed_outputs)
 
-    return Model([inputs], [bkg, cv, cm, com])
+    return Model([inputs], [bkg] + instance)
 
 @gin.configurable()
 def encoder(
@@ -205,6 +211,60 @@ def instance_decoder(
 
     return Model(inputs, [claim_vectors, claim_map, center_of_mass], name=name)
 
+@gin.configurable()
+def instance_decoder_v2(
+    output_shape: Tuple[int, int],
+    filters: List[int],
+    n:int,
+    name:str = "MorpheusDeblendInstanceDecoder"
+) -> Model:
+    """The instance decoder outputs the values needed for source separation.
+
+    """
+    hw = output_shape[0]
+    input_shapes = list(
+        reversed(
+            [
+                [hw // (2 ** i), hw // (2 ** i), c]
+                for i, c in enumerate(filters, start=1)
+            ]
+        )
+    )
+
+    inputs = [layers.Input(shape=s) for s in input_shapes]
+    att_outs = list(map(lambda x: FastAttention()(x), inputs))
+
+    # We map the filters in reverse order because we start small and grow the
+    # output back to the input resolution. We add an additional filter for the
+    # final upsample and out
+    fuse_funcs = list(
+        map(
+            lambda f: fuse_up(f, name_prefix=name),
+            list(reversed(filters[:-1])) + [filters[-1]],
+        )
+    )
+    fuse_funcs_y = list(zip(fuse_funcs, att_outs))
+
+    def apply_fuse(x: tf.Tensor, func_y: Tuple[LayerFunc, tf.Tensor]) -> tf.Tensor:
+        func, y = func_y
+        f_x = func(x, y)
+        return f_x
+
+    fuse_out = reduce(apply_fuse, fuse_funcs_y, None)
+    up_out = layers.UpSampling2D()(fuse_out)
+
+    pre_conv = partial(layers.Conv2D, 32, 5, padding="SAME")
+
+    claim_map_conv = layers.Conv2D(output_shape[2] * n, 1, padding="SAME")(pre_conv()(up_out))
+    claim_map = layers.Reshape(output_shape + [n])(claim_map_conv)
+
+    center_of_mass = layers.Conv2D(
+        1, 1,
+        padding="SAME",
+        activation="sigmoid"
+        )(pre_conv()(up_out))
+
+    return Model(inputs, [claim_map, center_of_mass], name=name)
 
 @gin.configurable(whitelist=["kernel_size", "activation"])
 def res_down(
@@ -431,6 +491,35 @@ if __name__ == "__main__":
             assert o1.shape == o2
 
         print("VALIDATION COMPLETE")
+
+    def test_instance_decoder_v2():
+        # INSTANCE DECODER =========================================================
+        print("VALIDATING INSTANCE DECODER V2 SHAPE")
+
+        input_shape = [256, 256, 4]
+        layer_filters = [32, 64, 128, 256]
+        n = 5
+        enc = encoder(input_shape, layer_filters)
+        inputs = np.ones([1, 256, 256, 4], dtype=np.float32)
+        enc_outs = enc(inputs)
+
+
+        output_shape = [256, 256, 4]
+
+        sem_dec = instance_decoder_v2(output_shape, layer_filters,n)
+
+        instance_outs = sem_dec(list(reversed(enc_outs)))
+
+        expected_out_shapes = [
+            (1, 256, 256, 4, n),
+            (1, 256, 256, 1)
+        ]
+
+        for o1, o2 in zip(instance_outs, expected_out_shapes):
+            assert o1.shape == o2
+
+        print("VALIDATION COMPLETE")
+        # INSTANCE DECODER =========================================================
         # INSTANCE DECODER =========================================================
 
     def test_end_to_end():
@@ -474,7 +563,8 @@ if __name__ == "__main__":
         print("VALIDATION COMPLETE")
 
 
-    test_encoder()
-    test_semantic_decoder()
-    test_instance_decoder()
-    test_end_to_end()
+    #test_encoder()
+    #test_semantic_decoder()
+    #test_instance_decoder()
+    #test_instance_decoder_v2()
+    #test_end_to_end()
