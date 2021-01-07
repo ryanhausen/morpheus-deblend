@@ -25,6 +25,8 @@ from typing import List, Tuple
 
 import numpy as np
 
+from sklearn.metrics.pairwise import euclidean_distances, cosine_similarity
+
 def get_claim_map(
     n:int,
     source_locations: np.ndarray,
@@ -139,6 +141,158 @@ def get_claim_map(
 
     return output_array
 
+
+# ==============================================================================
+# Discretize claim vector directions
+# ==============================================================================
+# vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+
+
+# ENCODER vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+def get_claim_vector_magnitudes_single_pixel(
+    neighborhood_vectors: np.ndarray,
+    claim_vector_magnitude: np.ndarray,
+    claim_map: np.ndarray,
+    model_vals: List[np.ndarray],
+    src_centers: np.ndarray,
+    y: int,
+    x: int,
+    b: int
+) -> None:
+    relative_vectors = src_centers - np.array([y, x])
+    src_fluxes = np.array([max(model_vals[i][b, y, x], 0) for i in range(len(model_vals))])
+    normed_flux = src_fluxes / src_fluxes.sum()
+
+    cosine_measure = cosine_similarity(neighborhood_vectors, relative_vectors)
+    cosine_measure[:, src_fluxes < 0] = -1
+
+    euclidean_distance = euclidean_distances(neighborhood_vectors, relative_vectors)
+    normed_euclidean_distance = euclidean_distance / euclidean_distance.sum()
+
+    metric = cosine_measure * (1 - normed_euclidean_distance) * (normed_flux[np.newaxis, :])
+
+    closest_srcs = np.argmax(metric, axis=1)
+    selected_srcs = relative_vectors[closest_srcs, :]
+
+    _claim_magnitudes = (selected_srcs * neighborhood_vectors).sum(axis=1)
+
+
+    idxs, counts = np.unique(closest_srcs, return_counts=True)
+    coefs = np.reciprocal(counts.astype(np.float32))
+    _claim_map = np.array(list(map(lambda i: coefs[idxs==i][0] * normed_flux[i], closest_srcs)))
+
+    claim_vector_magnitude[y, x, b, :] = _claim_magnitudes
+    claim_map[y, x, b, :] = _claim_map
+
+def get_claim_vector_image_and_map_discrete_directions(
+    source_locations: np.ndarray,
+    bkg: np.ndarray,
+    bhw: Tuple[int, int, int],
+    model_src_vals: List[np.ndarray],
+):
+    b, h, w = bhw
+    idxs = product(range(h), range(w), range(b))
+
+    neighborhood_vectors = np.array(list(product([0, -1, 1], [0, -1, 1]))[1:], dtype=np.float32)
+    neighborhood_vectors /= np.linalg.norm(neighborhood_vectors, axis=-1)[:, np.newaxis]
+
+    claim_vector_magnitude = np.zeros([h, w, b, 8], dtype=np.float32)
+    claim_map = np.zeros([h, w, b, 8], dtype=np.float32)
+
+    src_ys, src_xs = np.nonzero(source_locations)
+    src_centers = np.array([src_ys, src_xs]).T  # [n, 2]
+
+    encode_f = partial(
+        get_claim_vector_magnitudes_single_pixel,
+        neighborhood_vectors,
+        claim_vector_magnitude,
+        claim_map,
+        model_src_vals,
+        src_centers
+    )
+
+    for _ in starmap(encode_f, idxs):
+        pass
+
+    return claim_vector_magnitude, claim_map
+# ENCODER ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+# DECODER vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+def decode_single_pixel(
+    output:np.ndarray, # [n, h, w, b]
+    neighborhood_vectors: np.ndarray, # [8, 2]
+    flux:np.ndarray, # [h, w, b]
+    claim_vector_magnitude:np.ndarray, # [h, w, b, 8]
+    claim_map:np.ndarray, # [h, w, b, 8]
+    src_centers:np.ndarray, # [n, 2]
+    y:int,
+    x:int,
+    b:int
+) -> None:
+    pixel_flux = flux[y, x, b]
+    pixel_magnitudes = claim_vector_magnitude[y, x, b, :].copy()
+    pixel_claim_map = claim_map[y, x, b, :].copy()
+
+    relative_vectors = neighborhood_vectors * pixel_magnitudes[:, np.newaxis]
+    relative_centers = src_centers - np.array([y, x])
+
+    distances = euclidean_distances(relative_vectors, relative_centers) # [n_neighborhood, n_centers]
+    closest_src = np.argmin(distances, axis=1)
+
+    distributed_flux = pixel_flux * pixel_claim_map
+
+    def update_output(src_idx:int, flx:float):
+        output[src_idx, y, x, b] += flx
+
+    for _ in starmap(update_output, zip(closest_src, distributed_flux)):
+        pass
+
+
+def get_sources_discrete_directions(
+    flux_image: np.ndarray,  # [h, w, b]
+    claim_vector_magnitude: np.ndarray,  # [h, w, b, 8]
+    claim_map: np.ndarray,  # [h, w, b, 8]
+    background_map: np.ndarray,  # [h, w]
+    center_of_mass: np.ndarray,  # [h, w]
+    bkg_thresh_coef: float = 0.7,
+) -> np.ndarray: # [n, h, w, b]
+    y, x, b = flux_image.shape
+
+    src_locations = non_maximum_suppression(7, 0.1, center_of_mass)  # [h, w]
+    src_centers = np.stack(np.nonzero(src_locations), axis=1) + 0.5 # [n, 2]
+
+    output = np.zeros([src_centers.shape[0], y, x, b], dtype=np.float32)
+
+    neighborhood_vectors = np.array(list(product([0, -1, 1], [0, -1, 1]))[1:], dtype=np.float32)
+    neighborhood_vectors /= np.linalg.norm(neighborhood_vectors, axis=-1)[:, np.newaxis]
+
+    idxs = product(range(y), range(x), range(b))
+
+    decode_f = partial(
+        decode_single_pixel,
+        output,
+        neighborhood_vectors,
+        flux_image,
+        claim_vector_magnitude,
+        claim_map,
+        src_centers
+    )
+
+    for _ in starmap(decode_f, idxs):
+        pass
+
+    # filter out background pixels
+    bkg_filter = background_map[np.newaxis, :, :, np.newaxis] > bkg_thresh_coef
+
+    return output * bkg_filter
+# DECODER ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# ==============================================================================
+# Discretize claim vector directions
+# ==============================================================================
 
 def get_claim_vector_image_and_map(
     source_locations: np.ndarray,

@@ -331,26 +331,47 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
     ys, xs = np.nonzero(source_locations)
     source_idxs = np.array(list(zip(ys, xs)))
 
-    claim_map_image = label_encoder_decoder.get_claim_map(
-        5,
-        source_idxs,
-        flux.shape,
-        scarlet_src_vals
-    ) # [h, w, b, n]
+
+    # CLAIM MAP ONLY ===========================================================
+    # claim_map_image = label_encoder_decoder.get_claim_map(
+    #     5,
+    #     source_idxs,
+    #     flux.shape,
+    #     scarlet_src_vals
+    # ) # [h, w, b, n]
+    # CLAIM MAP ONLY ===========================================================
 
 
+    # CLAIM VECTOR V1 ==========================================================
     # (
     #     claim_vector_image,
     #     claim_map_image,
     # ) = label_encoder_decoder.get_claim_vector_image_and_map(
     #     source_locations, background, flux.shape, scarlet_src_vals
     # )
+    # CLAIM VECTOR V1 ==========================================================
+
+
+    # CLAIM VECTOR MAGNITUDES ==================================================
+    (
+        claim_vector_image,
+        claim_map_image,
+    ) = label_encoder_decoder.get_claim_vector_image_and_map_discrete_directions(
+        source_locations,
+        background,
+        flux.shape,
+        scarlet_src_vals,
+    )
+
+    # CLAIM VECTOR MAGNITUDES ==================================================
+
+
 
     save_data = [
         np.transpose(flux, axes=(1, 2, 0)),
         background,
         center_of_mass,
-        # claim_vector_image,
+        claim_vector_image,
         claim_map_image,
     ]
 
@@ -362,7 +383,7 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
                 "flux",
                 "background",
                 "center_of_mass",
-                #"claim_vectors",
+                "claim_vectors",
                 "claim_maps"
             ],
         )
