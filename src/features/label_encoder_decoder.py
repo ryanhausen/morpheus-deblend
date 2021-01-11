@@ -161,13 +161,12 @@ def get_claim_vector_magnitudes_single_pixel(
 ) -> None:
     relative_vectors = src_centers - np.array([y, x])
     src_fluxes = np.array([max(model_vals[i][b, y, x], 0) for i in range(len(model_vals))])
-    normed_flux = src_fluxes / src_fluxes.sum()
+    normed_flux = src_fluxes / src_fluxes.max()
 
     cosine_measure = cosine_similarity(neighborhood_vectors, relative_vectors)
-    cosine_measure[:, src_fluxes < 0] = -1
 
     euclidean_distance = euclidean_distances(neighborhood_vectors, relative_vectors)
-    normed_euclidean_distance = euclidean_distance / euclidean_distance.sum()
+    normed_euclidean_distance = euclidean_distance / euclidean_distance.max(axis=1, keepdims=True)
 
     metric = cosine_measure * (1 - normed_euclidean_distance) * (normed_flux[np.newaxis, :])
 
