@@ -450,10 +450,11 @@ def main(img_size: int) -> None:
                 overwrite=True,
             )
 
-        for _ in map(rescale_psf, ["v", "z"]):
-            pass
+#        for _ in map(rescale_psf, ["v", "z"]):
+#            pass
 
-        fname = lambda b: f"{b}.fits" if b in "hj" else f"{b}_resized.fits"
+#        fname = lambda b: f"{b}.fits" if b in "hj" else f"{b}_resized.fits"
+        fname = lambda b: f"{b}.fits"
         psf_path = lambda b: os.path.join(DATA_PATH_RAW, "tinytim", fname(b))
         psfs = np.array([fits.getdata(psf_path(b)) for b in "hjvz"])
 
