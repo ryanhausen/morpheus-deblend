@@ -27,6 +27,8 @@ import numpy as np
 
 from sklearn.metrics.pairwise import euclidean_distances, cosine_similarity
 
+from tqdm import tqdm
+
 def get_claim_map(
     n:int,
     source_locations: np.ndarray,
@@ -161,7 +163,9 @@ def get_claim_vector_magnitudes_single_pixel(
 ) -> None:
     relative_vectors = src_centers - np.array([y, x])
     src_fluxes = np.array([max(model_vals[i][b, y, x], 0) for i in range(len(model_vals))])
-    normed_flux = src_fluxes / src_fluxes.max()
+    max_flux = src_fluxes.max()
+    normed_flux = src_fluxes / max_flux if max_flux > 0 else src_fluxes
+    normed_sum_to_one = src_fluxes / src_fluxes.sum()
 
     cosine_measure = cosine_similarity(neighborhood_vectors, relative_vectors)
 
@@ -178,7 +182,10 @@ def get_claim_vector_magnitudes_single_pixel(
 
     idxs, counts = np.unique(closest_srcs, return_counts=True)
     coefs = np.reciprocal(counts.astype(np.float32))
-    _claim_map = np.array(list(map(lambda i: coefs[idxs==i][0] * normed_flux[i], closest_srcs)))
+    _claim_map = np.array(list(map(
+        lambda i: coefs[idxs==i][0] * normed_sum_to_one[i],
+        closest_srcs
+    )))
 
     claim_vector_magnitude[y, x, b, :] = _claim_magnitudes
     claim_map[y, x, b, :] = _claim_map
@@ -281,10 +288,10 @@ def get_sources_discrete_directions(
     for _ in starmap(decode_f, idxs):
         pass
 
-    # filter out background pixels
-    bkg_filter = background_map[np.newaxis, :, :, np.newaxis] > bkg_thresh_coef
-
-    return output * bkg_filter
+    #filter out background pixels
+    #bkg_filter = background_map[np.newaxis, :, :, np.newaxis] > bkg_thresh_coef
+    #return output * bkg_filter
+    return output
 # DECODER ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 

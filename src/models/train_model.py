@@ -247,7 +247,7 @@ def execute_step(
 
     return outputs
 
-@gin.configurable(whitelist=["loss_func"])
+@gin.configurable(allowlist=["loss_func"])
 def step(
     strategy:tf.distribute.Strategy,
     model: tf.keras.models.Model,
@@ -313,7 +313,7 @@ def post_step(
 
 
 def main(config_file: str):
-    #strategy = tf.distribute.MirroredStrategy()
+    strategy = tf.distribute.MirroredStrategy()
     strategy = None
 
     gin.config.external_configurable(tf.keras.losses.BinaryCrossentropy, module='tf.keras.losses')

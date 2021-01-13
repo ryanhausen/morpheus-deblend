@@ -33,50 +33,99 @@ TRAIN_DATA_PATH = os.path.join(DATA_PATH_PROCESSED, "train")
 TEST_DATA_PATH = os.path.join(DATA_PATH_PROCESSED, "test")
 
 
-def grab_files_py(parent_dir:str, idx:int):
-    #i = idx.numpy().decode("UTF-8")
+def grab_files_py(parent_dir:str, instance_mode:str, idx:int):
+
+    if instance_mode=="v1":
+        fnames = ["flux", "background", "claim_vectors", "claim_maps", "center_of_mass"]
+    elif instance_mode=="v2":
+        fnames = ["flux", "background", "claim_maps", "center_of_mass"]
+    elif instance_mode=="v3":
+        fnames = ["flux", "background", "claim_vectors", "claim_maps", "center_of_mass"]
+    else:
+        raise ValueError("instance_mode must be one of ['v1', 'v2', 'v3']")
 
     arrays = list(
         map(
             lambda suffix: fits.getdata(os.path.join(parent_dir, f"{idx.numpy().decode('UTF-8')}-{suffix}.fits")),
-            #v1 ["flux", "background", "claim_vectors", "claim_maps", "center_of_mass"]
-            ["flux", "background", "claim_maps", "center_of_mass"]
+            fnames
         )
     )
 
     return arrays
 
 
-def get_files(parent_dir:str, item_idx:tf.data.Dataset):
+def get_files(parent_dir:str, instance_mode:str, item_idx:tf.data.Dataset):
 
-    #flux, background, claim_vector, claim_map, center_of_mass = tf.py_function(
-    flux, background, claim_map, center_of_mass = tf.py_function(
-        partial(grab_files_py, parent_dir),
-        inp=[item_idx],
-        #Tout=(tf.float32, tf.float32, tf.float32, tf.float32, tf.float32)
-        Tout=(tf.float32, tf.float32, tf.float32, tf.float32)
-    )
-    n = 5
-    flux.set_shape([256, 256, 4])
-    background.set_shape([256, 256, 1])
-    #claim_vector.set_shape([256, 256, 4, 8, 2])
-    #claim_map.set_shape([256, 256, 4, 8])
-    claim_map.set_shape([256, 256, 4, n])
-    center_of_mass.set_shape([256, 256, 1])
+    if instance_mode=="v1":
+        (
+            flux,
+            background,
+            claim_vector,
+            claim_map,
+            center_of_mass
+        ) = tf.py_function(
+            partial(grab_files_py, parent_dir, instance_mode),
+            inp=[item_idx],
+            Tout=(tf.float32, tf.float32, tf.float32, tf.float32, tf.float32)
+        )
 
+        flux.set_shape([256, 256, 4])
+        background.set_shape([256, 256, 1])
+        claim_vector.set_shape([256, 256, 4, 8, 2])
+        claim_map.set_shape([256, 256, 4, 8])
+        center_of_mass.set_shape([256, 256, 1])
 
-    return tf.data.Dataset.from_tensors((
-        flux,
-        background,
-        #claim_vector,
-        claim_map,
-        center_of_mass,
-    ))
+        vals = (flux, background, claim_vector, claim_map, center_of_mass)
+    elif instance_mode=="v2":
+        n = 5
+
+        (
+            flux,
+            background,
+            claim_map,
+            center_of_mass
+        ) = tf.py_function(
+            partial(grab_files_py, parent_dir, instance_mode),
+            inp=[item_idx],
+            Tout=(tf.float32, tf.float32, tf.float32, tf.float32)
+        )
+
+        flux.set_shape([256, 256, 4])
+        background.set_shape([256, 256, 1])
+        claim_map.set_shape([256, 256, 4, n])
+        center_of_mass.set_shape([256, 256, 1])
+
+        vals = (flux, background, claim_map, center_of_mass)
+    elif instance_mode=="v3":
+        (
+            flux,
+            background,
+            claim_vector,
+            claim_map,
+            center_of_mass
+        ) = tf.py_function(
+            partial(grab_files_py, parent_dir, instance_mode),
+            inp=[item_idx],
+            Tout=(tf.float32, tf.float32, tf.float32, tf.float32, tf.float32)
+        )
+
+        flux.set_shape([256, 256, 4])
+        background.set_shape([256, 256, 1])
+        claim_vector.set_shape([256, 256, 4, 8])
+        claim_map.set_shape([256, 256, 4, 8])
+        center_of_mass.set_shape([256, 256, 1])
+
+        vals = (flux, background, claim_vector, claim_map, center_of_mass)
+    else:
+        raise ValueError("instance_mode must be one of ['v1', 'v2', 'v3']")
+
+    return tf.data.Dataset.from_tensors(vals)
 
 
 @gin.configurable()
 def get_dataset(
-    batch_size:int
+    batch_size:int,
+    instance_mode:str,
 ) -> Tuple[Tuple[tf.data.Dataset, int], Tuple[tf.data.Dataset, int]]:
 
     def get_idxs(directory:str):
@@ -84,6 +133,7 @@ def get_dataset(
 
     options = tf.data.Options()
     options.experimental_optimization.map_vectorization.enabled = True
+    options.experimental_distribute.auto_shard_policy = tf.data.experimental.AutoShardPolicy.DATA
 
     # Every training sample is composed of 5 files so divide the dir count by 5
 
@@ -100,10 +150,10 @@ def get_dataset(
 
     dataset_train = (
         train_idxs.interleave(
-            partial(get_files, TRAIN_DATA_PATH),
+            partial(get_files, TRAIN_DATA_PATH, instance_mode),
             cycle_length=batch_size,  # number of files to process in parallel
             block_length=1,  # how many items to produce from a single file
-            num_parallel_calls=5,
+            num_parallel_calls=2,
         )
         .with_options(options)
         .repeat()
@@ -127,14 +177,14 @@ def get_dataset(
 
     dataset_test = (
         test_idxs.interleave(
-            partial(get_files, TEST_DATA_PATH),
+            partial(get_files, TEST_DATA_PATH, instance_mode),
             cycle_length=batch_size,  # number of files to process in parallel
             block_length=1,  # how many items to produce from a single file
-            num_parallel_calls=5,
+            num_parallel_calls=2,
         )
         .with_options(options)
         .repeat()
-        .shuffle(batch_size + 1)
+        #.shuffle(batch_size + 1)
         #.map(preprocess)
         #.map(augment)
         .batch(batch_size)

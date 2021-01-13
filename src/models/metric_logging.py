@@ -73,7 +73,7 @@ def scale_image(data):
     ret = (ret - ret.min())/(ret.max()-ret.min())
     return ret
 
-@gin.configurable(whitelist=[
+@gin.configurable(allowlist=[
     "lambda_semantic",
     "lambda_claim_vector",
     "lambda_claim_map",
@@ -98,14 +98,14 @@ def update_metrics(
 
 
 
-    if instance_mode=="v1":
+    if instance_mode in ["v1", "v3"]:
         flux, y_bkg, y_claim_vector, y_claim_map, y_com = inputs
         yh_bkg, yh_claim_vector, yh_claim_map, yh_com = outputs
     elif instance_mode=="v2":
         flux, y_bkg, y_claim_map, y_com = inputs
         yh_bkg, yh_claim_map, yh_com = outputs
     else:
-        raise ValueError("instance_mode must be 'v1' or 'v2'")
+        raise ValueError("instance_mode must in ['v1', 'v2', 'v3']")
 
     l_semantic = losses.semantic_loss(y=y_bkg, yh=yh_bkg)
     l_cm = losses.claim_map_loss(bkg=y_bkg, y=y_claim_map, yh=yh_claim_map)
@@ -113,8 +113,17 @@ def update_metrics(
     l_total = losses.loss_function(inputs, outputs)
 
     if instance_mode=="v1":
-        l_cv = losses.claim_vector_loss(bkg=y_bkg, y=y_claim_vector, yh=yh_claim_vector)
-
+        l_cv = losses.claim_vector_loss(
+            bkg=y_bkg,
+            y=y_claim_vector,
+            yh=yh_claim_vector
+        )
+    if instance_mode=="v3":
+        l_cv = losses.discrete_claim_vector_loss(
+            bkg=y_bkg,
+            y=y_claim_vector,
+            yh=yh_claim_vector
+        )
 
     if is_training:
         metrics = [
@@ -125,6 +134,10 @@ def update_metrics(
         ]
 
         if instance_mode=="v1":
+            metrics.append(
+                ("ClaimVectorLoss", l_cv * lambda_claim_vector),
+            )
+        if instance_mode=="v3":
             metrics.append(
                 ("ClaimVectorLoss", l_cv * lambda_claim_vector),
             )
@@ -203,8 +216,9 @@ def update_metrics(
         _center_of_mass_loss.update_state(l_com * lambda_center_of_mass, n)
         _total_loss.update_state(l_total, n)
 
-        if instance_mode=="v1":
+        if instance_mode in ["v1", "v3"]:
             _claim_vector_loss.update_state(l_cv * lambda_claim_vector, n)
+
 
         if epoch_progress >= 1:
             metrics = [
@@ -214,7 +228,7 @@ def update_metrics(
                 ("Loss", _total_loss),
             ]
 
-            if instance_mode=="v1":
+            if instance_mode in ["v1", "v3"]:
                 metrics.append(
                     ("ClaimVectorLoss", _claim_vector_loss),
                 )

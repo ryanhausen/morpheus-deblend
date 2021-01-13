@@ -362,7 +362,6 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
         flux.shape,
         scarlet_src_vals,
     )
-
     # CLAIM VECTOR MAGNITUDES ==================================================
 
 
@@ -478,7 +477,6 @@ def main(img_size: int) -> None:
             for fname_key in file_keywords
         ]
 
-        print("Opening data files")
 
         big_array_fname = os.path.join(DATA_PATH_PROCESSED, "combined_array.dat")
         if not os.path.exists(big_array_fname):
@@ -487,7 +485,6 @@ def main(img_size: int) -> None:
             )
 
             def update_arr(i):
-                arr = fits.getdata(data_fnames[i])
                 data[:, :, i] = arr[:, :]
                 del arr
 
