@@ -64,7 +64,7 @@ def nan_inf_detector(y, yh, loss, name):
 
 
 
-@gin.configurable(whitelist=["loss_object", "avg"])
+@gin.configurable(allowlist=["loss_object", "avg"])
 def semantic_loss(
     loss_object:tf.keras.losses.Loss, # use binary crossentropy
     avg:Callable,
@@ -79,7 +79,7 @@ def semantic_loss(
     #return avg(validated_loss) # [0,]
     return avg(per_example_loss)
 
-@gin.configurable(whitelist=["loss_object", "avg"])
+@gin.configurable(allowlist=["loss_object", "avg"])
 def claim_vector_loss(
     loss_object: tf.keras.losses.Loss, # use L1
     avg:Callable,
@@ -100,7 +100,25 @@ def claim_vector_loss(
     # validated_loss = nan_inf_detector(y, yh, per_example_loss, "ClaimVectorLoss")
     # return avg(validated_loss)
 
-@gin.configurable(whitelist=["loss_object", "avg"])
+@gin.configurable(allowlist=["loss_object", "avg"])
+def discrete_claim_vector_loss(
+    loss_object: tf.keras.losses.Loss, # use L1, l2
+    avg:Callable,
+    bkg:TensorLike, # [n, h, w, 1]
+    y:TensorLike, # [n, h, w, b, 8],
+    yh:TensorLike, # [n, h, w, b, 8]
+) -> float:
+
+    weighting = tf.math.abs(bkg[:, :, :, 0] - 1) # [n, h, w]
+
+    connected_loss = loss_object(y, yh) # [n, h, w, b]
+    band_loss = tf.math.reduce_mean(connected_loss, axis=-1) # [n, h, w]
+
+    per_pixel_loss = band_loss * weighting # [n, h, w]
+    per_example_loss = tf.math.reduce_mean(per_pixel_loss, axis=(1, 2)) # [n,]
+    return avg(per_example_loss)
+
+@gin.configurable(allowlist=["loss_object", "avg"])
 def claim_map_loss(
     loss_object: tf.keras.losses.Loss, # use Categorical crossentrioy
     avg:Callable,
@@ -112,7 +130,7 @@ def claim_map_loss(
     weighting = tf.math.abs(bkg[:, :, :, 0] - 1) # [n, h, w]
 
     band_loss = loss_object(y, yh) # [n, h, w, b]
-    pixel_loss = tf.math.reduce_sum(band_loss, axis=-1) # [n, h, w]
+    pixel_loss = tf.math.reduce_mean(band_loss, axis=-1) # [n, h, w]
 
     weighted_loss = pixel_loss * weighting # [n, h, w]
     per_example_loss = tf.math.reduce_mean(weighted_loss, axis=(1, 2)) #[n,]
@@ -121,7 +139,7 @@ def claim_map_loss(
     # return avg(validated_loss) # [0,]
 
 
-@gin.configurable(whitelist=["loss_object", "avg"])
+@gin.configurable(allowlist=["loss_object", "avg"])
 def center_of_mass_loss(
     loss_object: tf.keras.losses.Loss, # use L2 loss
     avg: Callable,
@@ -134,7 +152,7 @@ def center_of_mass_loss(
     return avg(per_example_loss) # [0,]
 
 
-@gin.configurable(whitelist=[
+@gin.configurable(allowlist=[
     "lambda_semantic",
     "lambda_claim_vector",
     "lambda_claim_map",
@@ -161,7 +179,6 @@ def loss_function(
             + lambda_claim_map * claim_map_loss(bkg=y_bkg, y=y_claim_map, yh=yh_claim_map)
             + lambda_center_of_mass * center_of_mass_loss(y=y_com, yh=yh_com)
         )
-
     elif instance_mode=="v2":
         flux, y_bkg, y_claim_map, y_com = inputs
         yh_bkg, yh_claim_map, yh_com = outputs
@@ -171,8 +188,18 @@ def loss_function(
             + lambda_claim_map * claim_map_loss(bkg=y_bkg, y=y_claim_map, yh=yh_claim_map)
             + lambda_center_of_mass * center_of_mass_loss(y=y_com, yh=yh_com)
         )
+    elif instance_mode=="v3":
+        flux, y_bkg, y_claim_vector, y_claim_map, y_com = inputs
+        yh_bkg, yh_claim_vector, yh_claim_map, yh_com = outputs
+
+        loss = (
+            lambda_semantic * semantic_loss(y=y_bkg, yh=yh_bkg)
+            + lambda_claim_vector * discrete_claim_vector_loss(bkg=y_bkg, y=y_claim_vector, yh=yh_claim_vector)
+            + lambda_claim_map * claim_map_loss(bkg=y_bkg, y=y_claim_map, yh=yh_claim_map)
+            + lambda_center_of_mass * center_of_mass_loss(y=y_com, yh=yh_com)
+        )
     else:
-        raise ValueError("instance_mode must be equal to 'v1' or 'v2'")
+        raise ValueError("instance_mode must be equal to 'v1', 'v2', or 'v3'")
 
 
     return loss

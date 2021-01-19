@@ -42,6 +42,18 @@ from tensorflow.keras.models import Model
 LayerFunc = Callable[[tf.Tensor], tf.Tensor]
 Tensorlike = Union[tf.Tensor, np.ndarray]
 
+# ==============================================================================
+# Instance Modes:
+#
+# v1: neigborhood claim vectors are assigned to the source nearest to them.
+#     claim maps and center of mass are like PanopticDeepLab
+#
+# v2: claim vectors are no longer used, claim maps and com are unchanged
+#
+# v3: discete claim vectors, model predicts magnitude
+# ==============================================================================
+
+
 @gin.configurable()
 def get_model(input_shape = List[int], instance_mode:str = "v1") -> Model:
 
@@ -54,8 +66,10 @@ def get_model(input_shape = List[int], instance_mode:str = "v1") -> Model:
         dec_instance = instance_decoder()
     elif instance_mode=="v2":
         dec_instance = instance_decoder_v2()
+    elif instance_mode=="v3":
+        dec_instance = instance_decoder_v3()
     else:
-        raise ValueError("Instance mode should be 'v1' or 'v2'")
+        raise ValueError("Instance mode should be 'v1', 'v2', or 'v3'")
 
     enc_outputs = enc(inputs)
     reversed_outputs = list(reversed(enc_outputs))
@@ -116,7 +130,6 @@ def semantic_decoder(
     """The semantic decoder module outputs a class map for semantic segmentation.
 
     """
-
     hw = output_shape[0]
     input_shapes = list(
         reversed(
@@ -128,7 +141,10 @@ def semantic_decoder(
     )
 
     inputs = [layers.Input(shape=s) for s in input_shapes]
-    att_outs = list(map(lambda x: FastAttention()(x), inputs))
+    att_outs = list(starmap(
+        lambda s, x: AdaptiveFastAttention(s[2])(x),
+        zip(input_shapes, inputs)
+    ))
 
     # We map the filters in reverse order because we start small and grow the
     # output back to the input resolution. We add an additional filter for the
@@ -174,7 +190,7 @@ def instance_decoder(
     )
 
     inputs = [layers.Input(shape=s) for s in input_shapes]
-    att_outs = list(map(lambda x: FastAttention()(x), inputs))
+    att_outs = list(map(lambda x: AdaptiveFastAttention()(x), inputs))
 
     # We map the filters in reverse order because we start small and grow the
     # output back to the input resolution. We add an additional filter for the
@@ -232,7 +248,7 @@ def instance_decoder_v2(
     )
 
     inputs = [layers.Input(shape=s) for s in input_shapes]
-    att_outs = list(map(lambda x: FastAttention()(x), inputs))
+    att_outs = list(map(lambda x: AdaptiveFastAttention()(x), inputs))
 
     # We map the filters in reverse order because we start small and grow the
     # output back to the input resolution. We add an additional filter for the
@@ -266,7 +282,64 @@ def instance_decoder_v2(
 
     return Model(inputs, [claim_map, center_of_mass], name=name)
 
-@gin.configurable(whitelist=["kernel_size", "activation"])
+@gin.configurable()
+def instance_decoder_v3(
+    output_shape: Tuple[int, int],
+    filters: List[int],
+    name:str ="MorpheusDeblendInstanceDecoder",
+) -> Model:
+    hw = output_shape[0]
+    input_shapes = list(
+        reversed(
+            [
+                [hw // (2 ** i), hw // (2 ** i), c]
+                for i, c in enumerate(filters, start=1)
+            ]
+        )
+    )
+
+    inputs = [layers.Input(shape=s) for s in input_shapes]
+    att_outs = list(starmap(
+        lambda s, x: AdaptiveFastAttention(c_prime=s[2])(x),
+        zip(input_shapes, inputs)
+    ))
+
+    # We map the filters in reverse order because we start small and grow the
+    # output back to the input resolution. We add an additional filter for the
+    # final upsample and out
+    fuse_funcs = list(
+        map(
+            lambda f: fuse_up(f, name_prefix=name),
+            list(reversed(filters[:-1])) + [filters[-1]],
+        )
+    )
+    fuse_funcs_y = list(zip(fuse_funcs, att_outs))
+
+    def apply_fuse(x: tf.Tensor, func_y: Tuple[LayerFunc, tf.Tensor]) -> tf.Tensor:
+        func, y = func_y
+        f_x = func(x, y)
+        return f_x
+
+    fuse_out = reduce(apply_fuse, fuse_funcs_y, None)
+    up_out = layers.UpSampling2D()(fuse_out)
+
+    pre_conv = partial(layers.Conv2D, 32, 5, padding="SAME")
+
+    claim_vectors_conv = layers.Conv2D(output_shape[2] * 8, 1, padding="SAME")(pre_conv()(up_out))
+    claim_vectors = layers.Reshape(output_shape + [8])(claim_vectors_conv)
+
+    claim_map_conv = layers.Conv2D(output_shape[2] * 8, 1, padding="SAME")(pre_conv()(up_out))
+    claim_map = layers.Reshape(output_shape + [8])(claim_map_conv)
+
+    center_of_mass = layers.Conv2D(
+        1, 1,
+        padding="SAME",
+        activation="sigmoid"
+    )(pre_conv()(up_out))
+
+    return Model(inputs, [claim_vectors, claim_map, center_of_mass], name=name)
+
+@gin.configurable(allowlist=["kernel_size", "activation"])
 def res_down(
     filters: int,
     kernel_size: int = 3,
@@ -324,7 +397,7 @@ def res_down(
     return lambda x: block_2(block_1(x))
 
 
-@gin.configurable(whitelist=["activation"])
+@gin.configurable(allowlist=["activation"])
 def fuse_up(
     filters: int, activation: layers.Layer = layers.ReLU, name_prefix: str = "",
 ) -> LayerFunc:
@@ -342,82 +415,122 @@ def fuse_up(
     return lambda x, y: op(x, y)
 
 
-@gin.configurable(whitelist=["c_prime"])
-class FastAttention(tf.keras.layers.Layer):
-    """ Fast Attention Module from:
 
-    Real-time Semantic Segmentation with Fast Attention
-    https://arxiv.org/pdf/2007.03815.pdf
+class QKVEncoder(tf.keras.layers.Layer):
+    """Quey, Key, and Value embedding"""
 
+    def __init__(self, filters:int, QKV:str, **kwargs):
+        super(QKVEncoder, self).__init__(**kwargs)
+        self.filters = filters
+        self.conv = layers.Conv2D(filters, 1)
+        self.bn = layers.BatchNormalization()
+        self.reshape = layers.Reshape([-1, filters])
+        self.qkv = QKV
 
-    Args:
-        c_prime (int): The number of attention features in q and k
-    """
+        if QKV in ["Q", "K"]:
+            self.final_op = lambda x: K.l2_normalize(x, axis=2)
+        elif QKV in ["V"]:
+            self.final_op = lambda x: K.relu(x)
+        else:
+            raise ValueError("QKC must be one of 'Q', 'K', 'V'")
 
-    def __init__(self, c_prime: int = 32, **kwargs):
-        super(FastAttention, self).__init__(**kwargs)
-        self.c_prime = c_prime
-
-        self.q_conv = tf.keras.layers.Conv2D(c_prime, 1)
-        self.q_bn = tf.keras.layers.BatchNormalization()
-        self.k_conv = tf.keras.layers.Conv2D(c_prime, 1)
-        self.k_bn = tf.keras.layers.BatchNormalization()
-
-        self.v_bn = tf.keras.layers.BatchNormalization()
-
-        self.att_bn = tf.keras.layers.BatchNormalization()
-
-        self.kT_v_mul = tf.keras.layers.Dot(axes=(1, 1))
-        self.q_kTv_mul = tf.keras.layers.Dot(axes=(2, 1))
-
-        self.qkv_bn = tf.keras.layers.BatchNormalization()
-
-        self.residual_add = tf.keras.layers.Add(name="FastAttentionOut")
-
-    def build(self, input_shape):  # [None, h, w, c]
-        h = w = input_shape[1]
-        n = input_shape[1] * input_shape[2]
-        c = input_shape[-1]
-
-        self.n = tf.constant(n, dtype=tf.float32)
-        self.att_conv = tf.keras.layers.Conv2D(c, 1)  # [None, h, w, c]
-        self.v_conv = tf.keras.layers.Conv2D(c, 1)  # [None, h, w, c]
-
-        self.flat_q = tf.keras.layers.Reshape([n, self.c_prime])
-        self.flat_k = tf.keras.layers.Reshape([n, self.c_prime])
-        self.flat_v = tf.keras.layers.Reshape([n, c])
-
-        self.square_qkv = tf.keras.layers.Reshape([h, w, c])
-
-        self.qkv_conv = tf.keras.layers.Conv2D(c, 1)
 
     def call(self, inputs):
+        bn = self.bn(self.conv(inputs))
+        encoding = self.final_op(self.reshape(bn))
 
-        pre_v = self.v_bn(self.v_conv(inputs))  # [None, h, w, c]
+        if self.qkv in ["Q", "K"]:
+            return encoding
+        else:
+            return (encoding, bn)
 
-        q = K.l2_normalize(
-            self.flat_q(self.q_bn(self.q_conv(inputs))), axis=-1
-        )  # [None, n, c']
-        k = K.l2_normalize(
-            self.flat_k(self.k_bn(self.k_conv(inputs))), axis=-1
-        )  # [None, n, c']
-        v = K.relu(self.flat_v(pre_v))  # [None, n, c]
-
-        kTv = self.kT_v_mul([k, v])  # [None, c', c]
-        qkTv = self.q_kTv_mul([q, kTv])  # [None, n, c]
-
-        square_qkTv = self.square_qkv(qkTv)  # [None, h, w, c]
-        qkTv_out = self.qkv_bn(self.qkv_conv(square_qkTv))  # [None, h, w, c]
-
-        att_out = self.residual_add([pre_v, qkTv_out])  # [None, h, w, c]
-
-        return att_out
 
     # Adapted from:
     # https://github.com/tensorflow/tensorflow/blob/fcc4b966f1265f466e82617020af93670141b009/tensorflow/python/keras/layers/dense_attention.py#L483
     def get_config(self):
         config = dict(c_prime=self.c_prime)
-        base_config = super(FastAttention, self).get_config()
+        base_config = super(QKVEncoder, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
+
+@gin.configurable(allowlist=["c_prime"])
+class AdaptiveFastAttention(tf.keras.layers.Layer):
+    """ Adaptive Fast Attention Layer.
+    Based on:
+    Real-time Semantic Segmentation with Fast Attention
+    https://arxiv.org/pdf/2007.03815.pdf
+    The change to the Fast Attention module is to vary the order of
+    matrix multiplications operations according to the size of `n` and `c'`
+    to minimize complexity.
+    Args:
+        c_prime (int): The number of attention features in q and k
+    """
+
+    def __init__(self, c_prime:int=128, **kwargs):
+        super(AdaptiveFastAttention, self).__init__(**kwargs)
+        self.c_prime = c_prime
+
+
+    @staticmethod
+    def attention_qk_first(q, k, v):
+        qk = layers.Dot(axes=(2, 2))([q, k])
+        qkv = layers.Dot(axes=(2, 1))([qk, v])
+        return qkv
+
+    @staticmethod
+    def attention_kv_first(q, k, v):
+        kv = layers.Dot(axes=(1, 1))([k, v])
+        qkv = layers.Dot(axes=(2, 1))([q, kv])
+        return qkv
+
+
+    def build(self, input_shape):
+        batch_size, h, w, c = input_shape
+        n = h * w
+
+        self.n_coef = tf.constant(
+            1 / n,
+            dtype=tf.float32
+        )
+
+        self.Q = QKVEncoder(self.c_prime, "Q")
+        self.K = QKVEncoder(self.c_prime, "K")
+        self.V = QKVEncoder(c, "V")
+
+        qk_v_cost = (n**2 * self.c_prime) + (n**2 * c)
+        q_kv_cost = (n * self.c_prime * c) * 2
+
+        self.qk_first = qk_v_cost < q_kv_cost
+
+        if self.qk_first:
+            self.multiply_qkv = AdaptiveFastAttention.attention_qk_first
+        else:
+            self.multiply_qkv = AdaptiveFastAttention.attention_kv_first
+
+        self.square_qkv = tf.keras.layers.Reshape([h, w, c])
+
+        self.conv = layers.Conv2D(c, 3, padding="SAME")
+        self.bn = layers.BatchNormalization()
+        self.relu = layers.ReLU()
+
+        self.residual_add = layers.Add()
+
+    def call(self, inputs):
+        q = self.Q(inputs)
+        k = self.K(inputs)
+        v, residual_v = self.V(inputs)
+
+        qkv = self.multiply_qkv(q, k, v)
+
+        out = self.relu(self.bn(self.conv(self.square_qkv(qkv))))
+
+        return self.residual_add([residual_v, out])
+
+    # Adapted from:
+    # https://github.com/tensorflow/tensorflow/blob/fcc4b966f1265f466e82617020af93670141b009/tensorflow/python/keras/layers/dense_attention.py#L483
+    def get_config(self):
+        config = dict(c_prime=self.c_prime)
+        base_config = super(AdaptiveFastAttention, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
 
 
@@ -522,6 +635,32 @@ if __name__ == "__main__":
         # INSTANCE DECODER =========================================================
         # INSTANCE DECODER =========================================================
 
+    def test_instance_decoder_v3():
+        print("VALIDATING INSTANCE DECODER V3 SHAPE")
+        input_shape = [256, 256, 4]
+        layer_filters = [32, 64, 128, 256]
+        enc = encoder(input_shape, layer_filters)
+        inputs = np.ones([1, 256, 256, 4], dtype=np.float32)
+        enc_outs = enc(inputs)
+
+
+        output_shape = [256, 256, 4]
+
+        sem_dec = instance_decoder_v3(output_shape, layer_filters)
+
+        instance_outs = sem_dec(list(reversed(enc_outs)))
+
+        expected_out_shapes = [
+            (1, 256, 256, 4, 8),
+            (1, 256, 256, 4, 8),
+            (1, 256, 256, 1)
+        ]
+
+        for o1, o2 in zip(instance_outs, expected_out_shapes):
+            assert o1.shape == o2
+        print("VALIDATION COMPLETE")
+
+
     def test_end_to_end():
         print("VALIDATING END TO END SHAPE")
 
@@ -551,9 +690,8 @@ if __name__ == "__main__":
         outputs = end_to_end(inputs)
 
         expected_out_shapes = [
-            (1, 256, 256, 1),
-            (1, 256, 256, 4, 8, 2),
-            (1, 256, 256, 4, 8),
+            (1, 256, 256, 8),
+            (1, 256, 256, 8),
             (1, 256, 256, 1)
         ]
 
@@ -567,4 +705,5 @@ if __name__ == "__main__":
     #test_semantic_decoder()
     #test_instance_decoder()
     #test_instance_decoder_v2()
+    test_instance_decoder_v3()
     #test_end_to_end()

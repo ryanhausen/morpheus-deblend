@@ -1,0 +1,3 @@
+export CUDA_VISIBLE_DEVICES=0
+export comet_key=7RAJWNcaP5oZy7JTc68VjgZE3
+python3 src/models/train_model.py PanopticFastAttention.gin
