@@ -165,7 +165,10 @@ def get_claim_vector_magnitudes_single_pixel(
     src_fluxes = np.array([max(model_vals[i][b, y, x], 0) for i in range(len(model_vals))])
     max_flux = src_fluxes.max()
     normed_flux = src_fluxes / max_flux if max_flux > 0 else src_fluxes
-    normed_sum_to_one = src_fluxes / src_fluxes.sum()
+
+    flx_sum = src_fluxes.sum()
+    uniform_dist = np.ones_like(src_fluxes) / src_fluxes.shape[0]
+    normed_sum_to_one = src_fluxes / src_fluxes.sum() if flx_sum > 0 else uniform_dist
 
     cosine_measure = cosine_similarity(neighborhood_vectors, relative_vectors)
 
