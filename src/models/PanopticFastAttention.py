@@ -555,6 +555,8 @@ class AdaptiveFastAttention(tf.keras.layers.Layer):
             1 / n,
             dtype=tf.float32
         )
+        
+        self.n_multiply = layers.Lambda(lambda x: n_coef * x)
 
         self.Q = QKVEncoder(self.c_prime, "Q")
         self.K = QKVEncoder(self.c_prime, "K")
@@ -583,7 +585,7 @@ class AdaptiveFastAttention(tf.keras.layers.Layer):
         k = self.K(inputs)
         v, residual_v = self.V(inputs)
 
-        qkv = self.multiply_qkv(q, k, v)
+        qkv = self.n_coef(self.multiply_qkv(q, k, v))
 
         out = self.relu(self.bn(self.conv(self.square_qkv(qkv))))
 

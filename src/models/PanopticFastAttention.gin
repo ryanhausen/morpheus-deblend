@@ -116,7 +116,7 @@ __main__.training_func.checkpoint_dir = "../../models"
 __main__.training_func.epochs = 2000
 __main__.training_func.log_metric_batch_idx = 10
 __main__.training_func.model_code_file = "PanopticFastAttention.py"
-__main__.training_func.comet_disabled = False
+__main__.training_func.comet_disabled = True
 __main__.training_func.experiment_project_name = "morpheus-deblend"
 __main__.training_func.experiment_key = None
 
