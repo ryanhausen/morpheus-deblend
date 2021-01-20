@@ -173,7 +173,8 @@ def get_claim_vector_magnitudes_single_pixel(
     cosine_measure = cosine_similarity(neighborhood_vectors, relative_vectors)
 
     euclidean_distance = euclidean_distances(neighborhood_vectors, relative_vectors)
-    normed_euclidean_distance = euclidean_distance / euclidean_distance.max(axis=1, keepdims=True)
+    euclidean_norm = np.maximum(euclidean_distance.max(axis=1, keepdims=True), 1e-5)
+    normed_euclidean_distance = euclidean_distance / euclidean_norm
 
     metric = cosine_measure * (1 - normed_euclidean_distance) * (normed_flux[np.newaxis, :])
 
@@ -228,7 +229,7 @@ def get_claim_vector_image_and_map_discrete_directions(
 
 
 # DECODER vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-def decode_single_pixel(
+def decode_discrete_vectors_single_pixel(
     output:np.ndarray, # [n, h, w, b]
     neighborhood_vectors: np.ndarray, # [8, 2]
     flux:np.ndarray, # [h, w, b]
@@ -279,7 +280,7 @@ def get_sources_discrete_directions(
     idxs = product(range(y), range(x), range(b))
 
     decode_f = partial(
-        decode_single_pixel,
+        decode_discrete_vectors_single_pixel,
         output,
         neighborhood_vectors,
         flux_image,
@@ -301,6 +302,160 @@ def get_sources_discrete_directions(
 # ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 # ==============================================================================
 # Discretize claim vector directions
+# ==============================================================================
+
+
+
+
+# ==============================================================================
+# Closest n-sources claim vector
+# ==============================================================================
+# vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+
+# ENCODER vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+def get_n_closest_claim_vectors_single_pixel(
+    claim_vectors: np.ndarray,     # [h, w, b, n, 2]
+    claim_map: np.ndarray,         # [h, w, b, n]
+    model_vals: List[np.ndarray],
+    src_centers: np.ndarray,       # [n, 2]
+    n: int,
+    y: int,
+    x: int,
+    b: int,
+) -> None:
+    relative_vectors = src_centers - np.array([y, x]) # [n_srcs, 2]
+    relative_distances = np.linalg.norm(relative_vectors, axis=-1) # [n_srcs,]
+    raw_closest_sources = np.argsort(relative_distances)[:n] # [n, ]
+
+    num_pad = n - raw_closest_sources.shape[0]
+    if num_pad > 0:
+        n_closest_sources = raw_closest_sources
+    else:
+        n_closest_sources = np.pad(raw_closest_sources, (0, num_pad), mode="edge")
+
+    selected_srcs = relative_vectors[n_closest_sources]
+
+    src_fluxes = np.array([max(model_vals[i][b, y, x], 0) for i in raw_closest_sources])
+
+    sum_flux = src_fluxes.sum()
+    if sum_flux > 0:
+        normed_flux = src_fluxes / sum_flux
+    else:
+        normed_flux = np.ones([n], dtype=np.float32) / n
+
+    idxs, counts = np.unique(n_closest_sources, return_counts=True)
+    coefs = np.reciprocal(counts.astype(np.float32))
+
+    claim = np.array(list(map(
+        lambda i: coefs[idxs==i][0] * normed_flux[i==raw_closest_sources][0],
+        n_closest_sources
+    )))
+
+    claim_vectors[y, x, b, ...] = selected_srcs
+    claim_map[y, x, b, ...] = claim
+
+
+def get_n_closest_claim_vectors(
+    source_locations: np.ndarray,
+    bkg: np.ndarray,
+    bhw: Tuple[int, int, int],
+    model_src_vals: List[np.ndarray],
+    n: int,
+) -> Tuple[np.ndarray, np.ndarray]: # [h, w, b, n], [h, w, b, n, 2]
+
+    b, y, x = bhw
+
+    src_ys, src_xs = np.nonzero(source_locations)
+    src_centers = np.array([src_ys, src_xs]).T  # [n, 2]
+
+    idxs = product(range(y), range(x), range(b))
+
+    claim_vector = np.zeros([y, x, b, n, 2], dtype=np.float32)
+    claim_map = np.zeros([y, x, b, n], dtype=np.float32)
+
+    encode_f = partial(
+        get_n_closest_claim_vectors_single_pixel,
+        claim_vector,
+        claim_map,
+        model_src_vals,
+        src_centers,
+        n,
+    )
+
+    for _ in starmap(encode_f, tqdm(idxs, total=y*x*b)):
+        pass
+
+    return claim_vector, claim_map
+
+# ENCODER ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+# DECODER vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+def decode_n_closest_sources_single_pixel(
+    output:np.ndarray,
+    flux:np.ndarray,
+    claim_vector:np.ndarray,
+    claim_map:np.ndarray,
+    src_centers:np.ndarray,
+    y:int,
+    x:int,
+    b:int,
+) -> None:
+    pixel_flux = flux[y, x, b]
+    pixel_vectors = claim_vector[y, x, b, ...].copy() # [n, 2]
+    pixel_claim_map = claim_map[y, x, b, ...].copy() # [n,]
+
+    relative_centers = src_centers - np.array([y, x])
+
+    distances = euclidean_distances(pixel_vectors, relative_centers) #[n, n_src_centers]
+    closest_srcs = np.argmin(distances, axis=1)
+
+    distributed_flux = pixel_flux * pixel_claim_map
+
+    def update_output(src_idx:int, flx:float):
+        output[src_idx, y, x, b] += flx
+
+    for _ in starmap(update_output, zip(closest_srcs, distributed_flux)):
+        pass
+
+
+def decode_n_closest_sources(
+    flux:np.ndarray,
+    claim_vector:np.ndarray,
+    claim_map:np.ndarray,
+    src_centers:np.ndarray,
+    background_map: np.ndarray,  # [h, w]
+    center_of_mass: np.ndarray,  # [h, w]
+    bkg_thresh_coef: float = 0.7,
+) -> np.ndarray:
+
+    src_locations = non_maximum_suppression(7, 0.1, center_of_mass)  # [h, w]
+    src_centers = np.stack(np.nonzero(src_locations), axis=1) + 0.5 # [n, 2]
+
+    y, x, b = flux.shape
+    output = np.zeros([src_centers.shape[0], y, x, b], dtype=np.float32)
+
+    idxs = product(range(y), range(x), range(b))
+
+    decode_f = partial(
+        decode_n_closest_sources_single_pixel,
+        output,
+        flux,
+        claim_vector,
+        claim_map,
+        src_centers,
+    )
+
+    for _ in starmap(decode_f, tqdm(idxs, total=y*x*b)):
+        pass
+
+    return output
+
+# DECODER ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# ==============================================================================
+# Closest n-sources claim vector
 # ==============================================================================
 
 def get_claim_vector_image_and_map(
