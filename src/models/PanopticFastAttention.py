@@ -51,6 +51,8 @@ Tensorlike = Union[tf.Tensor, np.ndarray]
 # v2: claim vectors are no longer used, claim maps and com are unchanged
 #
 # v3: discete claim vectors, model predicts magnitude
+#
+# v4: n claim vectors, no neighborhoods
 # ==============================================================================
 
 
@@ -68,8 +70,10 @@ def get_model(input_shape = List[int], instance_mode:str = "v1") -> Model:
         dec_instance = instance_decoder_v2()
     elif instance_mode=="v3":
         dec_instance = instance_decoder_v3()
+    elif instance_mode=="v4":
+        dec_instance = instance_decoder_v4()
     else:
-        raise ValueError("Instance mode should be 'v1', 'v2', or 'v3'")
+        raise ValueError("Instance mode should be one of ['v1', 'v2', 'v3', 'v4']")
 
     enc_outputs = enc(inputs)
     reversed_outputs = list(reversed(enc_outputs))
@@ -330,6 +334,65 @@ def instance_decoder_v3(
 
     claim_map_conv = layers.Conv2D(output_shape[2] * 8, 1, padding="SAME")(pre_conv()(up_out))
     claim_map = layers.Reshape(output_shape + [8])(claim_map_conv)
+
+    center_of_mass = layers.Conv2D(
+        1, 1,
+        padding="SAME",
+        activation="sigmoid"
+    )(pre_conv()(up_out))
+
+    return Model(inputs, [claim_vectors, claim_map, center_of_mass], name=name)
+
+
+@gin.configurable()
+def instance_decoder_v4(
+    output_shape: Tuple[int, int],
+    filters: List[int],
+    n:int,
+    name:str ="MorpheusDeblendInstanceDecoder",
+) -> Model:
+    hw = output_shape[0]
+    input_shapes = list(
+        reversed(
+            [
+                [hw // (2 ** i), hw // (2 ** i), c]
+                for i, c in enumerate(filters, start=1)
+            ]
+        )
+    )
+
+    inputs = [layers.Input(shape=s) for s in input_shapes]
+    att_outs = list(starmap(
+        lambda s, x: AdaptiveFastAttention(c_prime=s[2])(x),
+        zip(input_shapes, inputs)
+    ))
+
+    # We map the filters in reverse order because we start small and grow the
+    # output back to the input resolution. We add an additional filter for the
+    # final upsample and out
+    fuse_funcs = list(
+        map(
+            lambda f: fuse_up(f, name_prefix=name),
+            list(reversed(filters[:-1])) + [filters[-1]],
+        )
+    )
+    fuse_funcs_y = list(zip(fuse_funcs, att_outs))
+
+    def apply_fuse(x: tf.Tensor, func_y: Tuple[LayerFunc, tf.Tensor]) -> tf.Tensor:
+        func, y = func_y
+        f_x = func(x, y)
+        return f_x
+
+    fuse_out = reduce(apply_fuse, fuse_funcs_y, None)
+    up_out = layers.UpSampling2D()(fuse_out)
+
+    pre_conv = partial(layers.Conv2D, 32, 5, padding="SAME")
+
+    claim_vectors_conv = layers.Conv2D(output_shape[2] * n, 1, padding="SAME")(pre_conv()(up_out))
+    claim_vectors = layers.Reshape(output_shape + [n])(claim_vectors_conv)
+
+    claim_map_conv = layers.Conv2D(output_shape[2] * n, 1, padding="SAME")(pre_conv()(up_out))
+    claim_map = layers.Reshape(output_shape + [n])(claim_map_conv)
 
     center_of_mass = layers.Conv2D(
         1, 1,

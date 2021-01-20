@@ -169,7 +169,7 @@ def loss_function(
     instance_mode:str = "v1",
 ) -> float:
 
-    if instance_mode=="v1":
+    if instance_mode in ["v1", "v4"]:
         flux, y_bkg, y_claim_vector, y_claim_map, y_com = inputs
         yh_bkg, yh_claim_vector, yh_claim_map, yh_com = outputs
 

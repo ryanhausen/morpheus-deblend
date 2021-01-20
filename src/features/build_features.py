@@ -352,17 +352,32 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
     # CLAIM VECTOR V1 ==========================================================
 
 
-    # CLAIM VECTOR MAGNITUDES ==================================================
+    # CLAIM VECTOR MAGNITUDES instance v3=======================================
+    # (
+    #     claim_vector_image,
+    #     claim_map_image,
+    # ) = label_encoder_decoder.get_claim_vector_image_and_map_discrete_directions(
+    #     source_locations,
+    #     background,
+    #     flux.shape,
+    #     scarlet_src_vals,
+    # )
+    # CLAIM VECTOR MAGNITUDES instance v3=======================================
+
+
+    # CLAIM VECTOR MAGNITUDES instance v4=======================================
+    n = 5
     (
         claim_vector_image,
         claim_map_image,
-    ) = label_encoder_decoder.get_claim_vector_image_and_map_discrete_directions(
+    ) = label_encoder_decoder.decode_n_closest_sources(
         source_locations,
         background,
         flux.shape,
         scarlet_src_vals,
+        n,
     )
-    # CLAIM VECTOR MAGNITUDES ==================================================
+    # CLAIM VECTOR MAGNITUDES instance v4=======================================
 
 
 

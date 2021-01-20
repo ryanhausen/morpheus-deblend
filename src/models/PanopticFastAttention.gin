@@ -44,7 +44,7 @@ tf.keras.losses.MeanSquaredError.reduction = "none"
 # src.features.data_provider.augment.normalize = False
 
 src.features.data_provider.get_dataset.batch_size = 16
-src.features.data_provider.get_dataset.instance_mode = "v3"
+src.features.data_provider.get_dataset.instance_mode = "v4"
 # src.features.data_provider ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
@@ -70,7 +70,7 @@ src.models.losses.loss_function.lambda_semantic = 2
 src.models.losses.loss_function.lambda_claim_vector = 0.1
 src.models.losses.loss_function.lambda_claim_map = 1
 src.models.losses.loss_function.lambda_center_of_mass = 100
-src.models.losses.loss_function.instance_mode = "v3"
+src.models.losses.loss_function.instance_mode = "v4"
 
 # src.models.losses ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -81,13 +81,13 @@ src.models.metric_logging.update_metrics.lambda_semantic = 2
 src.models.metric_logging.update_metrics.lambda_claim_vector = 0.1
 src.models.metric_logging.update_metrics.lambda_claim_map = 1
 src.models.metric_logging.update_metrics.lambda_center_of_mass = 100
-src.models.metric_logging.update_metrics.instance_mode = "v3"
+src.models.metric_logging.update_metrics.instance_mode = "v4"
 # src.models.metric_logging ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
 # src.models.PanopticFastAttention vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 src.models.PanopticFastAttention.get_model.input_shape = [256, 256, 4]
-src.models.PanopticFastAttention.get_model.instance_mode = "v3"
+src.models.PanopticFastAttention.get_model.instance_mode = "v4"
 
 src.models.PanopticFastAttention.encoder.input_shape = [256, 256, 4]
 src.models.PanopticFastAttention.encoder.filters = [32, 64, 128, 256]
