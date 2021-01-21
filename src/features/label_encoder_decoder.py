@@ -329,11 +329,12 @@ def get_n_closest_claim_vectors_single_pixel(
 
     num_pad = n - raw_closest_sources.shape[0]
     if num_pad > 0:
-        n_closest_sources = raw_closest_sources
-    else:
         n_closest_sources = np.pad(raw_closest_sources, (0, num_pad), mode="edge")
+    else:
+        n_closest_sources = raw_closest_sources
 
     selected_srcs = relative_vectors[n_closest_sources]
+
 
     src_fluxes = np.array([max(model_vals[i][b, y, x], 0) for i in raw_closest_sources])
 
@@ -341,7 +342,8 @@ def get_n_closest_claim_vectors_single_pixel(
     if sum_flux > 0:
         normed_flux = src_fluxes / sum_flux
     else:
-        normed_flux = np.ones([n], dtype=np.float32) / n
+        raw_n = raw_closest_sources.shape[0]
+        normed_flux = np.ones([raw_n], dtype=np.float32) / raw_n
 
     idxs, counts = np.unique(n_closest_sources, return_counts=True)
     coefs = np.reciprocal(counts.astype(np.float32))
@@ -382,7 +384,7 @@ def get_n_closest_claim_vectors(
         n,
     )
 
-    for _ in starmap(encode_f, tqdm(idxs, total=y*x*b)):
+    for _ in starmap(encode_f, idxs):
         pass
 
     return claim_vector, claim_map

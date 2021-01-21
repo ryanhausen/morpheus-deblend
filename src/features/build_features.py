@@ -370,7 +370,7 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
     (
         claim_vector_image,
         claim_map_image,
-    ) = label_encoder_decoder.decode_n_closest_sources(
+    ) = label_encoder_decoder.get_n_closest_claim_vectors(
         source_locations,
         background,
         flux.shape,
