@@ -84,8 +84,8 @@ def claim_vector_loss(
     loss_object: tf.keras.losses.Loss, # use L1
     avg:Callable,
     bkg:TensorLike, # [n, h, w, 1]
-    y:TensorLike, # [n, h, w, b, 8, 2]
-    yh:TensorLike, # [n, h, w, b, 8, 2]
+    y:TensorLike, # [n, h, w, b, k, 2]  k=8 for a neighborhood
+    yh:TensorLike, # [n, h, w, b, k, 2]
 ) -> float:
 
     weighting = tf.math.abs(bkg[:, :, :, 0] - 1) # [n, h, w]
@@ -169,7 +169,7 @@ def loss_function(
     instance_mode:str = "v1",
 ) -> float:
 
-    if instance_mode in ["v1", "v4"]:
+    if instance_mode in ["v1", "v4", "v5"]:
         flux, y_bkg, y_claim_vector, y_claim_map, y_com = inputs
         yh_bkg, yh_claim_vector, yh_claim_map, yh_com = outputs
 

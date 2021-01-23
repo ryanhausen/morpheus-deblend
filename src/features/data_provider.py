@@ -41,8 +41,12 @@ def grab_files_py(parent_dir:str, instance_mode:str, idx:int):
         fnames = ["flux", "background", "claim_maps", "center_of_mass"]
     elif instance_mode=="v3":
         fnames = ["flux", "background", "claim_vectors", "claim_maps", "center_of_mass"]
+    elif instance_mode=="v4":
+        fnames = ["flux", "background", "claim_vectors", "claim_maps", "center_of_mass"]
+    elif instance_mode=="v5":
+        fnames = ["flux", "background", "claim_vectors", "claim_maps", "center_of_mass"]
     else:
-        raise ValueError("instance_mode must be one of ['v1', 'v2', 'v3']")
+        raise ValueError("instance_mode must be one of ['v1', 'v2', 'v3', 'v4']")
 
     arrays = list(
         map(
@@ -116,8 +120,31 @@ def get_files(parent_dir:str, instance_mode:str, item_idx:tf.data.Dataset):
         center_of_mass.set_shape([256, 256, 1])
 
         vals = (flux, background, claim_vector, claim_map, center_of_mass)
+    elif instance_mode in ["v4", "v5"]:
+        n = 5
+        (
+            flux,
+            background,
+            claim_vector,
+            claim_map,
+            center_of_mass
+        ) = tf.py_function(
+            partial(grab_files_py, parent_dir, instance_mode),
+            inp=[item_idx],
+            Tout=(tf.float32, tf.float32, tf.float32, tf.float32, tf.float32)
+        )
+
+        flux.set_shape([256, 256, 4])
+        background.set_shape([256, 256, 1])
+        claim_vector.set_shape([256, 256, 4, n, 2])
+        claim_map.set_shape([256, 256, 4, n])
+        center_of_mass.set_shape([256, 256, 1])
+
+        vals = (flux, background, claim_vector, claim_map, center_of_mass)
     else:
-        raise ValueError("instance_mode must be one of ['v1', 'v2', 'v3']")
+        raise ValueError(
+            "instance_mode must be one of ['v1', 'v2', 'v3', 'v4', 'v5']"
+        )
 
     return tf.data.Dataset.from_tensors(vals)
 

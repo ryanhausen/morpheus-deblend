@@ -53,35 +53,51 @@ Tensorlike = Union[tf.Tensor, np.ndarray]
 # v3: discete claim vectors, model predicts magnitude
 #
 # v4: n claim vectors, no neighborhoods
+#
+# v5: n claim vectors, no neighborhoods, combined decoder
 # ==============================================================================
 
 
 @gin.configurable()
-def get_model(input_shape = List[int], instance_mode:str = "v1") -> Model:
+def get_model(
+    input_shape = List[int],
+    instance_mode:str = "v1"
+) -> Model:
 
     inputs = layers.Input(shape=input_shape)
 
     enc = encoder()
-    dec_semantic = semantic_decoder()
-
-    if instance_mode=="v1":
-        dec_instance = instance_decoder()
-    elif instance_mode=="v2":
-        dec_instance = instance_decoder_v2()
-    elif instance_mode=="v3":
-        dec_instance = instance_decoder_v3()
-    elif instance_mode=="v4":
-        dec_instance = instance_decoder_v4()
-    else:
-        raise ValueError("Instance mode should be one of ['v1', 'v2', 'v3', 'v4']")
-
     enc_outputs = enc(inputs)
     reversed_outputs = list(reversed(enc_outputs))
 
-    bkg = dec_semantic(reversed_outputs)
-    instance = dec_instance(reversed_outputs)
+    if instance_mode in ["v1", "v2", "v3", "v4"]:
+        dec_semantic = semantic_decoder()
 
-    return Model([inputs], [bkg] + instance)
+        if instance_mode=="v1":
+            dec_instance = instance_decoder()
+        elif instance_mode=="v2":
+            dec_instance = instance_decoder_v2()
+        elif instance_mode=="v3":
+            dec_instance = instance_decoder_v3()
+        elif instance_mode=="v4":
+            dec_instance = instance_decoder_v4()
+        else:
+            raise ValueError("Instance mode should be one of ['v1', 'v2', 'v3', 'v4']")
+
+        bkg = dec_semantic(reversed_outputs)
+        instance = dec_instance(reversed_outputs)
+
+        return Model([inputs], [bkg] + instance)
+    elif instance_mode=="v5":
+        combined_outs = instance_decoder_v5()(reversed_outputs)
+        return Model([inputs], combined_outs)
+    else:
+        raise ValueError(
+            "Instance mode should be one of ['v1', 'v2', 'v3', 'v4', 'v5']"
+        )
+
+
+
 
 @gin.configurable()
 def encoder(
@@ -388,8 +404,8 @@ def instance_decoder_v4(
 
     pre_conv = partial(layers.Conv2D, 32, 5, padding="SAME")
 
-    claim_vectors_conv = layers.Conv2D(output_shape[2] * n, 1, padding="SAME")(pre_conv()(up_out))
-    claim_vectors = layers.Reshape(output_shape + [n])(claim_vectors_conv)
+    claim_vectors_conv = layers.Conv2D(output_shape[2] * n * 2, 1, padding="SAME")(pre_conv()(up_out))
+    claim_vectors = layers.Reshape(output_shape + [n, 2])(claim_vectors_conv)
 
     claim_map_conv = layers.Conv2D(output_shape[2] * n, 1, padding="SAME")(pre_conv()(up_out))
     claim_map = layers.Reshape(output_shape + [n])(claim_map_conv)
@@ -401,6 +417,70 @@ def instance_decoder_v4(
     )(pre_conv()(up_out))
 
     return Model(inputs, [claim_vectors, claim_map, center_of_mass], name=name)
+
+@gin.configurable()
+def instance_decoder_v5(
+    output_shape: Tuple[int, int],
+    filters: List[int],
+    n_classes:int,
+    n_instances:int,
+    name:str = "MorpheusDeblendDecoder"
+) -> Model:
+    hw = output_shape[0]
+    input_shapes = list(
+        reversed(
+            [
+                [hw // (2 ** i), hw // (2 ** i), c]
+                for i, c in enumerate(filters, start=1)
+            ]
+        )
+    )
+
+    inputs = [layers.Input(shape=s) for s in input_shapes]
+    att_outs = list(starmap(
+        lambda s, x: AdaptiveFastAttention(c_prime=s[2])(x),
+        zip(input_shapes, inputs)
+    ))
+
+    # We map the filters in reverse order because we start small and grow the
+    # output back to the input resolution. We add an additional filter for the
+    # final upsample and out
+    fuse_funcs = list(
+        map(
+            lambda f: fuse_up(f, name_prefix=name),
+            list(reversed(filters[:-1])) + [filters[-1]],
+        )
+    )
+    fuse_funcs_y = list(zip(fuse_funcs, att_outs))
+
+    def apply_fuse(x: tf.Tensor, func_y: Tuple[LayerFunc, tf.Tensor]) -> tf.Tensor:
+        func, y = func_y
+        f_x = func(x, y)
+        return f_x
+
+    fuse_out = reduce(apply_fuse, fuse_funcs_y, None)
+    up_out = layers.UpSampling2D()(fuse_out)
+    pre_conv = partial(layers.Conv2D, 32, 5, padding="SAME")
+
+    # SEMANTIC OUT =============================================================
+    bkg = layers.Conv2D(n_classes, 1, padding="SAME")(pre_conv()(up_out))
+    # SEMANTIC OUT =============================================================
+
+    # INSTANCE OUT =============================================================
+    claim_vectors_conv = layers.Conv2D(output_shape[2] * n_instances * 2, 1, padding="SAME")(pre_conv()(up_out))
+    claim_vectors = layers.Reshape(output_shape + [n_instances, 2])(claim_vectors_conv)
+
+    claim_map_conv = layers.Conv2D(output_shape[2] * n_instances, 1, padding="SAME")(pre_conv()(up_out))
+    claim_map = layers.Reshape(output_shape + [n_instances])(claim_map_conv)
+
+    center_of_mass = layers.Conv2D(
+        1, 1,
+        padding="SAME",
+        activation="sigmoid"
+    )(pre_conv()(up_out))
+    # INSTANCE OUT =============================================================
+
+    return Model(inputs, [bkg, claim_vectors, claim_map, center_of_mass], name=name)
 
 @gin.configurable(allowlist=["kernel_size", "activation"])
 def res_down(
@@ -479,52 +559,79 @@ def fuse_up(
 
 
 
-class QKVEncoder(tf.keras.layers.Layer):
-    """Quey, Key, and Value embedding"""
+class QKEncoder(tf.keras.layers.Layer):
+    """Query and Key embedding layer"""
 
-    def __init__(self, filters:int, QKV:str, **kwargs):
-        super(QKVEncoder, self).__init__(**kwargs)
+    def __init__(self, filters:int, **kwargs):
+        super(QKEncoder, self).__init__(**kwargs)
         self.filters = filters
-        self.conv = layers.Conv2D(filters, 1)
-        self.bn = layers.BatchNormalization()
-        self.reshape = layers.Reshape([-1, filters])
-        self.qkv = QKV
-
-        if QKV in ["Q", "K"]:
-            self.final_op = lambda x: K.l2_normalize(x, axis=2)
-        elif QKV in ["V"]:
-            self.final_op = lambda x: K.relu(x)
-        else:
-            raise ValueError("QKC must be one of 'Q', 'K', 'V'")
-
+        self.conv = tf.keras.layers.Conv2D(filters, 1, padding="SAME")
+        self.bn = tf.keras.layers.BatchNormalization()
+        self.reshape = tf.keras.layers.Reshape([-1, filters])
+        self.l2_norm = tf.keras.layers.Lambda(lambda x: K.l2_normalize(x, axis=2))
 
     def call(self, inputs):
-        bn = self.bn(self.conv(inputs))
-        encoding = self.final_op(self.reshape(bn))
-
-        if self.qkv in ["Q", "K"]:
-            return encoding
-        else:
-            return (encoding, bn)
-
+        return self.l2_norm(
+            self.reshape(
+                self.bn(
+                    self.conv(
+                        inputs
+                    )
+                )
+            )
+        )
 
     # Adapted from:
     # https://github.com/tensorflow/tensorflow/blob/fcc4b966f1265f466e82617020af93670141b009/tensorflow/python/keras/layers/dense_attention.py#L483
     def get_config(self):
-        config = dict(c_prime=self.c_prime)
-        base_config = super(QKVEncoder, self).get_config()
+        config = dict(
+            filters=self.filters,
+        )
+        base_config = super(QKEncoder, self).get_config()
         return dict(list(base_config.items()) + list(config.items()))
+
+
+class VEncoder(tf.keras.layers.Layer):
+    """Value embedding layer"""
+
+    def __init__(self, filters:int, **kwargs):
+        super(VEncoder, self).__init__(**kwargs)
+        self.filters = filters
+        self.conv = tf.keras.layers.Conv2D(filters, 1, padding="SAME")
+        self.bn = tf.keras.layers.BatchNormalization()
+        self.reshape = tf.keras.layers.Reshape([-1, filters])
+        self.relu = tf.keras.layers.ReLU()
+
+    def call(self, inputs):
+        bn = self.bn(self.conv(inputs))
+        encoding = self.relu(self.reshape(bn))
+
+        return encoding, bn
+
+    # Adapted from:
+    # https://github.com/tensorflow/tensorflow/blob/fcc4b966f1265f466e82617020af93670141b009/tensorflow/python/keras/layers/dense_attention.py#L483
+    def get_config(self):
+        config = dict(
+            filters=self.filters,
+        )
+        base_config = super(VEncoder, self).get_config()
+        return dict(list(base_config.items()) + list(config.items()))
+
 
 
 @gin.configurable(allowlist=["c_prime"])
 class AdaptiveFastAttention(tf.keras.layers.Layer):
     """ Adaptive Fast Attention Layer.
+
     Based on:
+
     Real-time Semantic Segmentation with Fast Attention
     https://arxiv.org/pdf/2007.03815.pdf
+
     The change to the Fast Attention module is to vary the order of
     matrix multiplications operations according to the size of `n` and `c'`
     to minimize complexity.
+
     Args:
         c_prime (int): The number of attention features in q and k
     """
@@ -533,39 +640,36 @@ class AdaptiveFastAttention(tf.keras.layers.Layer):
         super(AdaptiveFastAttention, self).__init__(**kwargs)
         self.c_prime = c_prime
 
-
     @staticmethod
     def attention_qk_first(q, k, v):
-        qk = layers.Dot(axes=(2, 2))([q, k])
-        qkv = layers.Dot(axes=(2, 1))([qk, v])
+        qk = tf.keras.layers.Dot(axes=(2, 2))([q, k])
+        qkv = tf.keras.layers.Dot(axes=(2, 1))([qk, v])
         return qkv
 
     @staticmethod
     def attention_kv_first(q, k, v):
-        kv = layers.Dot(axes=(1, 1))([k, v])
-        qkv = layers.Dot(axes=(2, 1))([q, kv])
+        kv = tf.keras.layers.Dot(axes=(1, 1))([k, v])
+        qkv = tf.keras.layers.Dot(axes=(2, 1))([q, kv])
         return qkv
 
 
     def build(self, input_shape):
-        batch_size, h, w, c = input_shape
-        n = h * w
+        h = w = input_shape[1]
+        n = input_shape[1] * input_shape[2]
+        c = input_shape[-1]
 
-        self.n_coef = tf.constant(
-            1 / n,
-            dtype=tf.float32
-        )
-        
-        self.n_multiply = layers.Lambda(lambda x: n_coef * x)
+        n_coef = tf.constant(1 / n, dtype=tf.float32)
 
-        self.Q = QKVEncoder(self.c_prime, "Q")
-        self.K = QKVEncoder(self.c_prime, "K")
-        self.V = QKVEncoder(c, "V")
+        self.Q = QKEncoder(self.c_prime)
+        self.K = QKEncoder(self.c_prime)
+        self.V = VEncoder(c)
 
-        qk_v_cost = (n**2 * self.c_prime) + (n**2 * c)
-        q_kv_cost = (n * self.c_prime * c) * 2
+        qkv_cost = (n**2 * self.c_prime) + (n**2 * c)
+        kvq_cost = (n * self.c_prime * c) * 2
 
-        self.qk_first = qk_v_cost < q_kv_cost
+        self.qk_first = qkv_cost < kvq_cost
+
+        self.n_multiply = tf.keras.layers.Lambda(lambda x: n_coef * x)
 
         if self.qk_first:
             self.multiply_qkv = AdaptiveFastAttention.attention_qk_first
@@ -573,19 +677,18 @@ class AdaptiveFastAttention(tf.keras.layers.Layer):
             self.multiply_qkv = AdaptiveFastAttention.attention_kv_first
 
         self.square_qkv = tf.keras.layers.Reshape([h, w, c])
+        self.conv = tf.keras.layers.Conv2D(c, 3, padding="SAME")
+        self.bn = tf.keras.layers.BatchNormalization()
+        self.relu = tf.keras.layers.ReLU()
 
-        self.conv = layers.Conv2D(c, 3, padding="SAME")
-        self.bn = layers.BatchNormalization()
-        self.relu = layers.ReLU()
-
-        self.residual_add = layers.Add()
+        self.residual_add = tf.keras.layers.Add()
 
     def call(self, inputs):
         q = self.Q(inputs)
         k = self.K(inputs)
         v, residual_v = self.V(inputs)
 
-        qkv = self.n_coef(self.multiply_qkv(q, k, v))
+        qkv = self.n_multiply(self.multiply_qkv(q, k, v))
 
         out = self.relu(self.bn(self.conv(self.square_qkv(qkv))))
 
@@ -725,6 +828,8 @@ if __name__ == "__main__":
             assert o1.shape == o2
         print("VALIDATION COMPLETE")
 
+    def test_instance_decoder_v5():
+        pass
 
     def test_end_to_end():
         print("VALIDATING END TO END SHAPE")
@@ -770,5 +875,6 @@ if __name__ == "__main__":
     #test_semantic_decoder()
     #test_instance_decoder()
     #test_instance_decoder_v2()
-    test_instance_decoder_v3()
+    #test_instance_decoder_v3()
+    test_instance_decoder_v5()
     #test_end_to_end()

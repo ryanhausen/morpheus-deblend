@@ -25,6 +25,7 @@ import comet_ml
 import gin
 import numpy as np
 import tensorflow as tf
+from scipy.special import expit
 from tensorflow.keras.metrics import Mean
 
 
@@ -98,21 +99,21 @@ def update_metrics(
 
 
 
-    if instance_mode in ["v1", "v3", "v4"]:
+    if instance_mode in ["v1", "v3", "v4", "v5"]:
         flux, y_bkg, y_claim_vector, y_claim_map, y_com = inputs
         yh_bkg, yh_claim_vector, yh_claim_map, yh_com = outputs
     elif instance_mode=="v2":
         flux, y_bkg, y_claim_map, y_com = inputs
         yh_bkg, yh_claim_map, yh_com = outputs
     else:
-        raise ValueError("instance_mode must in ['v1', 'v2', 'v3', 'v4']")
+        raise ValueError("instance_mode must in ['v1', 'v2', 'v3', 'v4', 'v5']")
 
     l_semantic = losses.semantic_loss(y=y_bkg, yh=yh_bkg)
     l_cm = losses.claim_map_loss(bkg=y_bkg, y=y_claim_map, yh=yh_claim_map)
     l_com = losses.center_of_mass_loss(y=y_com, yh=yh_com)
     l_total = losses.loss_function(inputs, outputs)
 
-    if instance_mode in ["v1", "v4"]:
+    if instance_mode in ["v1", "v4", "v5"]:
         l_cv = losses.claim_vector_loss(
             bkg=y_bkg,
             y=y_claim_vector,
@@ -133,7 +134,7 @@ def update_metrics(
             ("Loss", l_total),
         ]
 
-        if instance_mode in ["v1", "v3", "v4"]:
+        if instance_mode in ["v1", "v3", "v4", "v5"]:
             metrics.append(
                 ("ClaimVectorLoss", l_cv * lambda_claim_vector),
             )
@@ -149,7 +150,7 @@ def update_metrics(
         )
 
         experiment.log_image(
-            yh_bkg[-1,...],
+            expit(yh_bkg[-1,...]),
             "OutputBackground",
             image_colormap="Greys",
             image_minmax=(0, 1)
@@ -212,7 +213,7 @@ def update_metrics(
         _center_of_mass_loss.update_state(l_com * lambda_center_of_mass, n)
         _total_loss.update_state(l_total, n)
 
-        if instance_mode in ["v1", "v3", "v4"]:
+        if instance_mode in ["v1", "v3", "v4", "v5"]:
             _claim_vector_loss.update_state(l_cv * lambda_claim_vector, n)
 
 
@@ -224,7 +225,7 @@ def update_metrics(
                 ("Loss", _total_loss),
             ]
 
-            if instance_mode in ["v1", "v3", "v4"]:
+            if instance_mode in ["v1", "v3", "v4", "v5"]:
                 metrics.append(
                     ("ClaimVectorLoss", _claim_vector_loss),
                 )
@@ -245,7 +246,7 @@ def update_metrics(
             )
 
             experiment.log_image(
-                yh_bkg[-1,...],
+                expit(yh_bkg[-1,...]),
                 "OutputBackground",
                 image_colormap="Greys",
                 image_minmax=(0, 1)
