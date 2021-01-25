@@ -22,7 +22,9 @@
 from itertools import starmap
 
 import comet_ml
+import flow_vis
 import gin
+import matplotlib as plt
 import numpy as np
 import tensorflow as tf
 from scipy.special import expit
@@ -177,6 +179,7 @@ def update_metrics(
             image_colormap="Greys"
         )
 
+        # log claim map images
         if instance_mode=="v2":
             experiment.log_image(
                 y_claim_map[-1, :, :, 0, 0],
@@ -205,6 +208,55 @@ def update_metrics(
                 image_colormap="Greys",
                 image_minmax=(0, 1)
             )
+
+        # log color vector representations
+        if instance_mode == "v5":
+            cv_cm_vals = [
+                (y_claim_vector, y_claim_map),
+                (yh_claim_vector, yh_claim_map),
+            ]
+
+            names = ["Input", "Output"]
+
+            for name, (cv, cm) in zip(names, cv_cm_vals):
+                f, axes = plt.subplots(
+                    ncols=2,
+                    nrows=5,
+                    figsize=(8, 20),
+                )
+
+                for i, ax in enumerate(axes.flat):
+                    # claim vector
+                    if i % 2 == 0:
+                        ax.imshow(
+                            flow_vis.flow_to_color(
+                                cv[-1, :, :, 0, i//2, [1, 0]],
+                                convert_to_bgr=False
+                            ),
+                            origin="lower"
+                        )
+                    # claim map
+                    else:
+                        ax.imshow(
+                            cm[-1, :, :, 0, i//2],
+                            vmin=0,
+                            vmax=1,
+                            cmap="magma",
+                            origin="lower",
+                        )
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+
+                    axes[0, 0].set_title("Claim Vectors")
+                    axes[0, 1].set_title("Claim Maps")
+                    plt.tight_layout()
+
+                experiment.log_figure(
+                    figure_name=f"{name}-CV/CM-Images",
+                    figure=f,
+                )
+                plt.close(f)
+
 
     else:
         n = flux.shape[0]
@@ -301,3 +353,51 @@ def update_metrics(
                     image_colormap="Greys",
                     image_minmax=(0, 1)
                 )
+
+                    # log color vector representations
+            if instance_mode == "v5":
+                cv_cm_vals = [
+                    (y_claim_vector, y_claim_map),
+                    (yh_claim_vector, yh_claim_map),
+                ]
+
+                names = ["Input", "Output"]
+
+                for name, (cv, cm) in zip(names, cv_cm_vals):
+                    f, axes = plt.subplots(
+                        ncols=2,
+                        nrows=5,
+                        figsize=(8, 20),
+                    )
+
+                    for i, ax in enumerate(axes.flat):
+                        # claim vector
+                        if i % 2 == 0:
+                            ax.imshow(
+                                flow_vis.flow_to_color(
+                                    cv[-1, :, :, 0, i//2, [1, 0]],
+                                    convert_to_bgr=False
+                                ),
+                                origin="lower"
+                            )
+                        # claim map
+                        else:
+                            ax.imshow(
+                                cm[-1, :, :, 0, i//2],
+                                vmin=0,
+                                vmax=1,
+                                cmap="magma",
+                                origin="lower",
+                            )
+                        ax.set_xticks([])
+                        ax.set_yticks([])
+
+                        axes[0, 0].set_title("Claim Vectors")
+                        axes[0, 1].set_title("Claim Maps")
+                        plt.tight_layout()
+
+                    experiment.log_figure(
+                        figure_name=f"{name}-CV/CM-Images",
+                        figure=f,
+                    )
+                    plt.close(f)
