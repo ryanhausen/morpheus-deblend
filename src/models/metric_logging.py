@@ -27,7 +27,7 @@ import gin
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
-from scipy.special import expit
+from scipy.special import expit, softmax
 from tensorflow.keras.metrics import Mean
 
 
@@ -244,7 +244,7 @@ def update_metrics(
                     # claim map
                     else:
                         ax.imshow(
-                            cm[:, :, 0, i//2],
+                            softmax(cm[:, :, 0, i//2], axis=-1),
                             vmin=0,
                             vmax=1,
                             cmap="magma",
@@ -395,7 +395,7 @@ def update_metrics(
                         # claim map
                         else:
                             ax.imshow(
-                                cm[:, :, 0, i//2],
+                                softmax(cm[:, :, 0, i//2], axis=-1),
                                 vmin=0,
                                 vmax=1,
                                 cmap="magma",
