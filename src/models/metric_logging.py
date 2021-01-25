@@ -218,7 +218,7 @@ def update_metrics(
                 ),
                 (
                     yh_claim_vector.numpy()[-1, ...],
-                    yh_claim_map.numpy()[-1, ...],
+                    softmax(yh_claim_map.numpy()[-1, ...], axis=-1),
                 ),
             ]
 
@@ -244,7 +244,7 @@ def update_metrics(
                     # claim map
                     else:
                         ax.imshow(
-                            softmax(cm[:, :, 0, i//2], axis=-1),
+                            cm[:, :, 0, i//2],
                             vmin=0,
                             vmax=1,
                             cmap="magma",
@@ -369,7 +369,7 @@ def update_metrics(
                     ),
                     (
                         yh_claim_vector.numpy()[-1, ...],
-                        yh_claim_map.numpy()[-1, ...],
+                        softmax(yh_claim_map.numpy()[-1, ...], axis=-1),
                     ),
                 ]
 
@@ -395,7 +395,7 @@ def update_metrics(
                         # claim map
                         else:
                             ax.imshow(
-                                softmax(cm[:, :, 0, i//2], axis=-1),
+                                cm[:, :, 0, i//2],
                                 vmin=0,
                                 vmax=1,
                                 cmap="magma",
