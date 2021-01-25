@@ -24,7 +24,7 @@ from itertools import starmap
 import comet_ml
 import flow_vis
 import gin
-import matplotlib as plt
+import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 from scipy.special import expit
@@ -212,8 +212,14 @@ def update_metrics(
         # log color vector representations
         if instance_mode == "v5":
             cv_cm_vals = [
-                (y_claim_vector, y_claim_map),
-                (yh_claim_vector, yh_claim_map),
+                (
+                    y_claim_vector.numpy()[-1, ...],
+                    y_claim_map.numpy()[-1, ...],
+                ),
+                (
+                    yh_claim_vector.numpy()[-1, ...],
+                    yh_claim_map.numpy()[-1, ...],
+                ),
             ]
 
             names = ["Input", "Output"]
@@ -230,7 +236,7 @@ def update_metrics(
                     if i % 2 == 0:
                         ax.imshow(
                             flow_vis.flow_to_color(
-                                cv[-1, :, :, 0, i//2, [1, 0]],
+                                cv[:, :, 0, i//2, [1, 0]],
                                 convert_to_bgr=False
                             ),
                             origin="lower"
@@ -238,7 +244,7 @@ def update_metrics(
                     # claim map
                     else:
                         ax.imshow(
-                            cm[-1, :, :, 0, i//2],
+                            cm[:, :, 0, i//2],
                             vmin=0,
                             vmax=1,
                             cmap="magma",
@@ -357,8 +363,14 @@ def update_metrics(
                     # log color vector representations
             if instance_mode == "v5":
                 cv_cm_vals = [
-                    (y_claim_vector, y_claim_map),
-                    (yh_claim_vector, yh_claim_map),
+                    (
+                        y_claim_vector.numpy()[-1, ...],
+                        y_claim_map.numpy()[-1, ...],
+                    ),
+                    (
+                        yh_claim_vector.numpy()[-1, ...],
+                        yh_claim_map.numpy()[-1, ...],
+                    ),
                 ]
 
                 names = ["Input", "Output"]
@@ -375,7 +387,7 @@ def update_metrics(
                         if i % 2 == 0:
                             ax.imshow(
                                 flow_vis.flow_to_color(
-                                    cv[-1, :, :, 0, i//2, [1, 0]],
+                                    cv[:, :, 0, i//2, [1, 0]],
                                     convert_to_bgr=False
                                 ),
                                 origin="lower"
@@ -383,7 +395,7 @@ def update_metrics(
                         # claim map
                         else:
                             ax.imshow(
-                                cm[-1, :, :, 0, i//2],
+                                cm[:, :, 0, i//2],
                                 vmin=0,
                                 vmax=1,
                                 cmap="magma",
