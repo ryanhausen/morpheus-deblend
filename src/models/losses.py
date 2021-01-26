@@ -79,21 +79,31 @@ def semantic_loss(
     #return avg(validated_loss) # [0,]
     return avg(per_example_loss)
 
-@gin.configurable(allowlist=["loss_object", "avg"])
+@gin.configurable(allowlist=["loss_object", "avg", "weighting"])
 def claim_vector_loss(
     loss_object: tf.keras.losses.Loss, # use L1
     avg:Callable,
-    bkg:TensorLike, # [n, h, w, 1]
-    y:TensorLike, # [n, h, w, b, k, 2]  k=8 for a neighborhood
-    yh:TensorLike, # [n, h, w, b, k, 2]
+    weighting:str,
+    bkg:TensorLike,         # [n, h, w, 1]
+    y_claim_map:TensorLike, # [n, h, w, b, k]
+    y:TensorLike,           # [n, h, w, b, k, 2]  k=8 for a neighborhood
+    yh:TensorLike,          # [n, h, w, b, k, 2]
 ) -> float:
 
-    weighting = tf.math.abs(bkg[:, :, :, 0] - 1) # [n, h, w]
+    connected_loss = loss_object(y, yh) # [n, h, w, b, k]
 
-    connected_loss = loss_object(y, yh) # [n, h, w, b, 8]
-    band_loss = tf.math.reduce_mean(connected_loss, axis=-1) # [n, h, w, b]
+    if weighting=="bkg":
+        band_loss = tf.math.reduce_mean(connected_loss, axis=-1) # [n, h, w, b]
+        weighting = tf.math.abs(bkg[:, :, :, 0] - 1) # [n, h, w]
+        per_pixel_loss = tf.math.reduce_sum(band_loss, axis=-1) * weighting # [n, h, w]
+    elif weighting=="claim_map":
+        weighting = y_claim_map
+        band_loss= tf.math.reduce_sum(connected_loss * y_claim_map, axis=-1) # [n, h, w, b]
+        per_pixel_loss = tf.math.reduce_mean(band_loss, axis=-1) # [n, h, w]
+    else:
+        band_loss = tf.math.reduce_sum(connected_loss, axis=-1) # [n, h, w, b]
+        per_pixel_loss = tf.math.reduce_mean(band_loss, axis=-1) # [n, h, w]
 
-    per_pixel_loss = tf.math.reduce_sum(band_loss, axis=-1) * weighting # [n, h, w]
     per_example_loss = tf.math.reduce_mean(per_pixel_loss, axis=(1, 2)) # [n,]
     return avg(per_example_loss)
 
@@ -175,7 +185,7 @@ def loss_function(
 
         loss = (
             lambda_semantic * semantic_loss(y=y_bkg, yh=yh_bkg)
-            + lambda_claim_vector * claim_vector_loss(bkg=y_bkg, y=y_claim_vector, yh=yh_claim_vector)
+            + lambda_claim_vector * claim_vector_loss(bkg=y_bkg, y_claim_map=y_claim_map, y=y_claim_vector, yh=yh_claim_vector)
             + lambda_claim_map * claim_map_loss(bkg=y_bkg, y=y_claim_map, yh=yh_claim_map)
             + lambda_center_of_mass * center_of_mass_loss(y=y_com, yh=yh_com)
         )

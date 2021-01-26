@@ -30,7 +30,7 @@ import src.models.train_model
 tf.keras.optimizers.Adam.learning_rate = 0.00001
 tf.keras.losses.BinaryCrossentropy.from_logits = True
 tf.keras.losses.BinaryCrossentropy.reduction = "none"
-tf.keras.losses.BinaryCrossentropy.label_smoothing = 0.1
+#tf.keras.losses.BinaryCrossentropy.label_smoothing = 0.1
 tf.keras.losses.CategoricalCrossentropy.from_logits = True
 tf.keras.losses.CategoricalCrossentropy.reduction = "none"
 tf.keras.losses.MeanAbsoluteError.reduction = "none"
@@ -57,6 +57,7 @@ src.models.losses.semantic_loss.avg = @tf.nn.compute_average_loss
 
 src.models.losses.claim_vector_loss.loss_object = @tf.keras.losses.MeanAbsoluteError()
 src.models.losses.claim_vector_loss.avg = @tf.nn.compute_average_loss
+src.models.losses.claim_vector_loss.weighting = "claim_map"
 
 src.models.losses.discrete_claim_vector_loss.loss_object = @tf.keras.losses.MeanAbsoluteError()
 src.models.losses.discrete_claim_vector_loss.avg = @tf.nn.compute_average_loss
@@ -67,10 +68,10 @@ src.models.losses.claim_map_loss.avg = @tf.nn.compute_average_loss
 src.models.losses.center_of_mass_loss.loss_object = @tf.keras.losses.MeanSquaredError()
 src.models.losses.center_of_mass_loss.avg = @tf.nn.compute_average_loss
 
-src.models.losses.loss_function.lambda_semantic = 0.0001
-src.models.losses.loss_function.lambda_claim_vector = 0.1
-src.models.losses.loss_function.lambda_claim_map = 1
-src.models.losses.loss_function.lambda_center_of_mass = 100
+src.models.losses.loss_function.lambda_semantic = 0.0
+src.models.losses.loss_function.lambda_claim_vector = 1.0
+src.models.losses.loss_function.lambda_claim_map = 0.0
+src.models.losses.loss_function.lambda_center_of_mass = 0.0
 src.models.losses.loss_function.instance_mode = "v5"
 
 # src.models.losses ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -78,10 +79,10 @@ src.models.losses.loss_function.instance_mode = "v5"
 # !!!!!!!!!!!!!!! The above and below lambda values should match !!!!!!!!!!!!!!!
 
 # src.models.metric_logging vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-src.models.metric_logging.update_metrics.lambda_semantic = 0.0001
-src.models.metric_logging.update_metrics.lambda_claim_vector = 0.1
-src.models.metric_logging.update_metrics.lambda_claim_map = 1
-src.models.metric_logging.update_metrics.lambda_center_of_mass = 100
+src.models.metric_logging.update_metrics.lambda_semantic = 0.0
+src.models.metric_logging.update_metrics.lambda_claim_vector = 1.0
+src.models.metric_logging.update_metrics.lambda_claim_map = 0.0
+src.models.metric_logging.update_metrics.lambda_center_of_mass = 0.0
 src.models.metric_logging.update_metrics.instance_mode = "v5"
 # src.models.metric_logging ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -91,7 +92,7 @@ src.models.PanopticFastAttention.get_model.input_shape = [256, 256, 4]
 src.models.PanopticFastAttention.get_model.instance_mode = "v5"
 
 src.models.PanopticFastAttention.encoder.input_shape = [256, 256, 4]
-src.models.PanopticFastAttention.encoder.filters = [8, 16, 32, 64]
+src.models.PanopticFastAttention.encoder.filters = [32, 62, 128, 256]
 
 src.models.PanopticFastAttention.semantic_decoder.output_shape = [256, 256, 4]
 src.models.PanopticFastAttention.semantic_decoder.filters = [32, 64, 128, 256]
@@ -112,7 +113,7 @@ src.models.PanopticFastAttention.instance_decoder_v4.filters = [32, 64, 128, 256
 src.models.PanopticFastAttention.instance_decoder_v4.n = 5
 
 src.models.PanopticFastAttention.instance_decoder_v5.output_shape = [256, 256, 4]
-src.models.PanopticFastAttention.instance_decoder_v5.filters = [8, 16, 32, 64]
+src.models.PanopticFastAttention.instance_decoder_v5.filters = [32, 62, 128, 256]
 src.models.PanopticFastAttention.instance_decoder_v5.n_classes = 1
 src.models.PanopticFastAttention.instance_decoder_v5.n_instances = 5
 # src.models.PanopticFastAttention ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
