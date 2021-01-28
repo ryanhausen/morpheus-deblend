@@ -39,10 +39,12 @@ tf.keras.losses.MeanSquaredError.reduction = "none"
 
 
 # src.features.data_provider vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
-# src.features.data_provider.augment.jitter = False
-# src.features.data_provider.augment.flip_y = False
-# src.features.data_provider.augment.flip_x = False
-# src.features.data_provider.augment.normalize = False
+src.features.data_provider.augment.flip_y = True
+src.features.data_provider.augment.flip_x = True
+src.features.data_provider.augment.translate_y = True
+src.features.data_provider.augment.translate_x = True
+src.features.data_provider.augment.rotate = True
+src.features.data_provider.augment.instance_mode = "v5"
 
 src.features.data_provider.get_dataset.batch_size = 16
 src.features.data_provider.get_dataset.instance_mode = "v5"

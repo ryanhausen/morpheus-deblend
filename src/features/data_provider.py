@@ -25,6 +25,7 @@ from typing import Tuple
 import gin
 import numpy as np
 import tensorflow as tf
+import tensorflow_addons as tfa
 from astropy.io import fits
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "../../data")
@@ -148,6 +149,111 @@ def get_files(parent_dir:str, instance_mode:str, item_idx:tf.data.Dataset):
 
     return tf.data.Dataset.from_tensors(vals)
 
+def apply_and_shape(fn, inputs):
+    shape = tf.shape(inputs)
+    flat_channels = tf.reshape(inputs, [shape[0], shape[1], -1])
+
+    return tf.reshape(fn(flat_channels), shape)
+
+
+@gin.configurable(allowlist=[
+    "flip_y",
+    "flip_x",
+    "translate_y",
+    "translate_x",
+    "rotate",
+    "instance_mode"
+])
+def augment(
+    flip_y:bool,
+    flip_x:bool,
+    translate_y:bool,
+    translate_x:bool,
+    rotate:bool,
+    instance_mode:str,
+    vals:Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor],
+) -> tf.Tensor:
+    """
+        flux: [h, w, b]
+        background: [h, w, 1]
+        claim_vector: [h, w, b, n, 2]
+        claim_map: [h, w, b, n]
+        center_of_mass: [h, w, 1]
+    """
+
+
+    if instance_mode in ["v1", "v3", "v4", "v5"]:
+        flux, background, claim_vector, claim_map, center_of_mass = vals
+        has_cv = True
+    elif instance_mode in ["v2"]:
+        flux, background, claim_map, center_of_mass = vals
+        has_cv = False
+    else:
+        raise ValueError(
+            "instance_mode must be one of ['v1', 'v2', 'v3', 'v4', 'v5']"
+        )
+
+
+    pi = tf.constant(np.pi, dtype=tf.float32)
+    one_eighty = tf.constant(180, dtype=tf.float32)
+
+    if flip_y and np.random.uniform() > 0.5:
+        fn = partial(apply_and_shape, tf.image.flip_up_down)
+        vals = tf.vectorized_map(fn, vals)
+
+        if has_cv:
+            tmp_y = vals[2][..., 0] * -1
+            tmp_x = vals[2][..., 1]
+            vals[2] = tf.stack([tmp_y, tmp_x], axis=-1)
+
+    if flip_x and tf.math.greater(tf.random.uniform(shape=[]), 0.5):
+        fn = partial(apply_and_shape, tf.image.flip_left_right)
+        vals = tf.vectorized_map(fn, vals)
+
+        if has_cv:
+            tmp_y = vals[2][..., 0]
+            tmp_x = vals[2][..., 1] * -1
+            vals[2] = tf.stack([tmp_y, tmp_x], axis=-1)
+
+    if translate_y and tf.math.greater(tf.random.uniform(shape=[]), 0.5):
+        dy = tf.random.uniform([], minval=0, maxval=25, dtype=tf.int32)
+        fn = partial(
+            apply_and_shape,
+            partial(tfa.image.translate, translations=[dy, 0])
+        )
+        vals = tf.vectorized_map(fn, vals)
+
+    if translate_x and tf.math.greater(tf.random.uniform(shape=[]), 0.5):
+        dx = tf.random.uniform([], minval=0, maxval=25, dtype=tf.int32)
+        fn = partial(
+            apply_and_shape,
+            partial(tfa.image.translate, translations=[0, dx])
+        )
+        vals = tf.vectorized_map(fn, vals)
+
+    if rotate and tf.math.greater(tf.random.uniform(shape=[]), 0.5):
+        theta = tf.random.uniform(shape=[], minval=1, maxval=360)
+        rad = theta * pi / one_eighty
+
+        fn = partial(
+            apply_and_shape,
+            partial(tfa.image.rotate, angles=rad),
+        )
+        vals = tf.vectorized_map(fn, vals)
+
+        if has_cv:
+            sin_theta = tf.constant(tf.sin(rad))
+            cos_theta = tf.constant(tf.cos(rad))
+
+            tmp_y = vals[2][..., 0]
+            tmp_x = vals[2][..., 1]
+
+            tmp_y = sin_theta * tmp_x + cos_theta * tmp_y
+            tmp_x = cos_theta * tmp_x - sin_theta * tmp_y
+
+            vals[2] = tf.stack([tmp_y, tmp_x], axis=-1)
+
+    return vals
 
 @gin.configurable()
 def get_dataset(
@@ -186,7 +292,7 @@ def get_dataset(
         .repeat()
         .shuffle(batch_size + 1)
         #.map(preprocess)
-        #.map(augment)
+        .map(augment)
         .batch(batch_size)
     )
 
