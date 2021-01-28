@@ -118,6 +118,7 @@ def update_metrics(
     if instance_mode in ["v1", "v4", "v5"]:
         l_cv = losses.claim_vector_loss(
             bkg=y_bkg,
+            y_claim_map=y_claim_map,
             y=y_claim_vector,
             yh=yh_claim_vector
         )
