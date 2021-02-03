@@ -21,6 +21,8 @@ import argparse
 from functools import partial
 import os
 import time
+import psutil
+
 from itertools import starmap
 from pathlib import Path
 from typing import Callable, Tuple, Union
@@ -219,6 +221,8 @@ def training_func(
 
 
     for _ in map(epoch_f, range(epochs)):
+        with open("/home/rhausen/jobs/morpheus-deblend/use_stats.log", "a") as f:
+            f.write(f"Memory: {psutil.virtual_memory().used / 1024 / 1024 / 1024} GB" + "\n")
         pass
 
 
@@ -232,7 +236,6 @@ def execute_step(
     is_training:bool,
     optimizer: tf.keras.optimizers.Optimizer = None
 ) -> Tuple[tf.Tensor, tf.Tensor, tf.Tensor]:
-
     flux = inputs[0]
 
     if is_training:

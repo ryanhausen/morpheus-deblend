@@ -27,6 +27,7 @@ import gin
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
+from mpl_toolkits.axes_grid1 import make_axes_locatable
 from scipy.special import expit, softmax
 from tensorflow.keras.metrics import Mean
 
@@ -233,24 +234,31 @@ def update_metrics(
                 )
 
                 for i, ax in enumerate(axes.flat):
+                    single_cv = cv[:, :, 0, i//2, :].copy()
+                    single_cv[:, :, 0]  = single_cv[:, :, 0] * -1
+
                     # claim vector
                     if i % 2 == 0:
                         ax.imshow(
                             flow_vis.flow_to_color(
-                                cv[:, :, 0, i//2, [1, 0]],
+                                single_cv[..., [1, 0]],
                                 convert_to_bgr=False
                             ),
                             origin="lower"
                         )
                     # claim map
                     else:
-                        ax.imshow(
+                        img_cmap = ax.imshow(
                             cm[:, :, 0, i//2],
                             vmin=0,
                             vmax=1,
                             cmap="magma",
                             origin="lower",
                         )
+                        divider = make_axes_locatable(ax)
+                        cax = divider.append_axes('right', size='5%', pad=0.05)
+                        f.colorbar(img_cmap, cax=cax, orientation='vertical')
+
                     ax.set_xticks([])
                     ax.set_yticks([])
 
@@ -361,7 +369,7 @@ def update_metrics(
                     image_minmax=(0, 1)
                 )
 
-                    # log color vector representations
+            # log color vector representations
             if instance_mode == "v5":
                 cv_cm_vals = [
                     (
@@ -384,11 +392,14 @@ def update_metrics(
                     )
 
                     for i, ax in enumerate(axes.flat):
+                        single_cv = cv[:, :, 0, i//2, :].copy()
+                        single_cv[:, :, 0]  = single_cv[:, :, 0] * -1
+
                         # claim vector
                         if i % 2 == 0:
                             ax.imshow(
                                 flow_vis.flow_to_color(
-                                    cv[:, :, 0, i//2, [1, 0]],
+                                    single_cv[..., [1, 0]],
                                     convert_to_bgr=False
                                 ),
                                 origin="lower"

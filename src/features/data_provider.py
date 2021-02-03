@@ -34,6 +34,14 @@ TRAIN_DATA_PATH = os.path.join(DATA_PATH_PROCESSED, "train")
 TEST_DATA_PATH = os.path.join(DATA_PATH_PROCESSED, "test")
 
 
+def open_file_py(parent_dir:str, suffix:str, idx:int):
+    return fits.getdata(
+        os.path.join(
+            parent_dir,
+            f"{idx.numpy().decode('UTF-8')}-{suffix}.fits"
+        )
+    )
+
 def grab_files_py(parent_dir:str, instance_mode:str, idx:int):
 
     if instance_mode=="v1":
@@ -141,20 +149,163 @@ def get_files(parent_dir:str, instance_mode:str, item_idx:tf.data.Dataset):
         claim_map.set_shape([256, 256, 4, n])
         center_of_mass.set_shape([256, 256, 1])
 
-        vals = (flux, background, claim_vector, claim_map, center_of_mass)
+        # vals = (
+        #     flux,
+        #     background,
+        #     tf.reshape(claim_vector, [256, 256, -1]),
+        #     tf.reshape(claim_map, [256, 256, -1]),
+        #     center_of_mass
+        # )
+
+        # this HAS to be a tuple to not get stacked
+        vals = (
+            flux,
+            background,
+            claim_vector,
+            claim_map,
+            center_of_mass,
+        )
+
+
     else:
         raise ValueError(
             "instance_mode must be one of ['v1', 'v2', 'v3', 'v4', 'v5']"
         )
 
-    return tf.data.Dataset.from_tensors(vals)
+    # print([type(v) for v in vals])
 
+    vals = tf.data.Dataset.from_tensors(vals)
+
+    return vals
+
+@tf.function(experimental_relax_shapes=True)
 def apply_and_shape(fn, inputs):
     shape = tf.shape(inputs)
     flat_channels = tf.reshape(inputs, [shape[0], shape[1], -1])
 
     return tf.reshape(fn(flat_channels), shape)
 
+
+# @gin.configurable(allowlist=[
+#     "flip_y",
+#     "flip_x",
+#     "translate_y",
+#     "translate_x",
+#     "rotate",
+#     "instance_mode"
+# ])
+def pure_augment(
+    flux: tf.Tensor,
+    background: tf.Tensor,
+    claim_vector: tf.Tensor,
+    claim_map: tf.Tensor,
+    center_of_mass: tf.Tensor,
+):
+
+    pi = tf.constant(np.pi, dtype=tf.float32)
+    one_eighty = tf.constant(180, dtype=tf.float32)
+
+
+    # Vertical Flip - 50/50
+    if tf.math.greater(tf.random.uniform(shape=[]), 0.5):
+        fn = partial(apply_and_shape, tf.image.flip_up_down)
+
+        flux = fn(flux)
+        background = fn(background)
+        claim_vector = fn(claim_vector)
+        claim_map = fn(claim_map)
+        center_of_mass = fn(center_of_mass)
+
+
+        tmp_y = claim_vector[..., 0] * -1
+        tmp_x = claim_vector[..., 1]
+        claim_vector = tf.stack([tmp_y, tmp_x], axis=-1)
+
+
+    # Horizontal Flip - 50/50
+    if tf.math.greater(tf.random.uniform(shape=[]), 0.5):
+        fn = partial(apply_and_shape, tf.image.flip_left_right)
+
+        flux = fn(flux)
+        background = fn(background)
+        claim_map = fn(claim_map)
+        center_of_mass = fn(center_of_mass)
+
+
+        claim_vector = fn(claim_vector)
+        tmp_y = claim_vector[..., 0]
+        tmp_x = claim_vector[..., 1] * -1
+        claim_vector = tf.stack([tmp_y, tmp_x], axis=-1)
+
+
+    # Vertical Shift - 50/50
+    if tf.math.greater(tf.random.uniform(shape=[]), 0.5):
+        dy = tf.random.uniform([], minval=0, maxval=25, dtype=tf.int32)
+        fn = partial(
+            apply_and_shape,
+            partial(tfa.image.translate, translations=[dy, 0])
+        )
+
+        flux = fn(flux)
+        background = fn(background)
+        claim_vector = fn(claim_vector)
+        claim_map = fn(claim_map)
+        center_of_mass = fn(center_of_mass)
+
+
+    # Horizontal Shift - 50/50
+    if tf.math.greater(tf.random.uniform(shape=[]), 0.5):
+        dx = tf.random.uniform([], minval=0, maxval=25, dtype=tf.int32)
+        fn = partial(
+            apply_and_shape,
+            partial(tfa.image.translate, translations=[0, dx])
+        )
+
+        flux = fn(flux)
+        background = fn(background)
+        claim_vector = fn(claim_vector)
+        claim_map = fn(claim_map)
+        center_of_mass = fn(center_of_mass)
+
+
+    # Rotate - 50/50
+    if tf.math.greater(tf.random.uniform(shape=[]), 0.5):
+        theta = tf.random.uniform(shape=[], minval=1, maxval=360)
+        rad = theta * pi / one_eighty
+
+        fn = partial(
+            apply_and_shape,
+            partial(tfa.image.rotate, angles=rad),
+        )
+
+
+        flux = fn(flux)
+        background = fn(background)
+        claim_vector = fn(claim_vector)
+        claim_map = fn(claim_map)
+        center_of_mass = fn(center_of_mass)
+
+        sin_theta = tf.sin(rad)
+        cos_theta = tf.cos(rad)
+
+        tmp_y = claim_vector[..., 0]
+        tmp_x = claim_vector[..., 1]
+
+        tmp_y = sin_theta * tmp_x + cos_theta * tmp_y
+        tmp_x = cos_theta * tmp_x - sin_theta * tmp_y
+
+        claim_vector = tf.stack([tmp_y, tmp_x], axis=-1)
+
+
+    vals = (
+        flux,
+        background,
+        claim_vector,
+        claim_map,
+        center_of_mass,
+    )
+
+    return vals
 
 @gin.configurable(allowlist=[
     "flip_y",
@@ -165,13 +316,14 @@ def apply_and_shape(fn, inputs):
     "instance_mode"
 ])
 def augment(
+    vals:Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor],
+    is_training:bool,
     flip_y:bool,
     flip_x:bool,
     translate_y:bool,
     translate_x:bool,
     rotate:bool,
     instance_mode:str,
-    vals:Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor],
 ) -> tf.Tensor:
     """
         flux: [h, w, b]
@@ -180,80 +332,126 @@ def augment(
         claim_map: [h, w, b, n]
         center_of_mass: [h, w, 1]
     """
+    print("\n\n INSIDE AUGMENT")
+    print(vals)
+    print("INSIDE AUGMENT \n\n")
 
 
-    if instance_mode in ["v1", "v3", "v4", "v5"]:
+    if instance_mode in ["v1", "v3", "v4"]:
         flux, background, claim_vector, claim_map, center_of_mass = vals
         has_cv = True
     elif instance_mode in ["v2"]:
         flux, background, claim_map, center_of_mass = vals
         has_cv = False
+    elif instance_mode in ["v5"]:
+        n = 5
+        cv_idx = 5 + int(4*n*2)
+        cm_idx = cv_idx + 4 * n
+        flux = vals[..., :4]
+        background = vals[..., 4:5]
+        claim_vector = tf.reshape(vals[..., 5:cv_idx], [256, 256, 4, n, 2])
+        claim_map = tf.reshape(vals[..., cv_idx:cm_idx], [256, 256, 4, n])
+        center_of_mass = vals[..., -1:]
+        # has_cv = True
     else:
         raise ValueError(
             "instance_mode must be one of ['v1', 'v2', 'v3', 'v4', 'v5']"
         )
 
+    if is_training:
+        pi = tf.constant(np.pi, dtype=tf.float32)
+        one_eighty = tf.constant(180, dtype=tf.float32)
 
-    pi = tf.constant(np.pi, dtype=tf.float32)
-    one_eighty = tf.constant(180, dtype=tf.float32)
+        if flip_y and tf.math.greater(tf.random.uniform(shape=[]), 0.5):
+            fn = partial(apply_and_shape, tf.image.flip_up_down)
 
-    if flip_y and np.random.uniform() > 0.5:
-        fn = partial(apply_and_shape, tf.image.flip_up_down)
-        vals = tf.vectorized_map(fn, vals)
+            flux = fn(flux)
+            background = fn(background)
+            claim_vector = fn(claim_vector)
+            claim_map = fn(claim_map)
+            center_of_mass = fn(center_of_mass)
 
-        if has_cv:
-            tmp_y = vals[2][..., 0] * -1
-            tmp_x = vals[2][..., 1]
-            vals[2] = tf.stack([tmp_y, tmp_x], axis=-1)
 
-    if flip_x and tf.math.greater(tf.random.uniform(shape=[]), 0.5):
-        fn = partial(apply_and_shape, tf.image.flip_left_right)
-        vals = tf.vectorized_map(fn, vals)
+            tmp_y = claim_vector[..., 0] * -1
+            tmp_x = claim_vector[..., 1]
+            claim_vector = tf.stack([tmp_y, tmp_x], axis=-1)
 
-        if has_cv:
-            tmp_y = vals[2][..., 0]
-            tmp_x = vals[2][..., 1] * -1
-            vals[2] = tf.stack([tmp_y, tmp_x], axis=-1)
+        if flip_x and tf.math.greater(tf.random.uniform(shape=[]), 0.5):
+            fn = partial(apply_and_shape, tf.image.flip_left_right)
 
-    if translate_y and tf.math.greater(tf.random.uniform(shape=[]), 0.5):
-        dy = tf.random.uniform([], minval=0, maxval=25, dtype=tf.int32)
-        fn = partial(
-            apply_and_shape,
-            partial(tfa.image.translate, translations=[dy, 0])
-        )
-        vals = tf.vectorized_map(fn, vals)
+            flux = fn(flux)
+            background = fn(background)
+            claim_map = fn(claim_map)
+            center_of_mass = fn(center_of_mass)
 
-    if translate_x and tf.math.greater(tf.random.uniform(shape=[]), 0.5):
-        dx = tf.random.uniform([], minval=0, maxval=25, dtype=tf.int32)
-        fn = partial(
-            apply_and_shape,
-            partial(tfa.image.translate, translations=[0, dx])
-        )
-        vals = tf.vectorized_map(fn, vals)
 
-    if rotate and tf.math.greater(tf.random.uniform(shape=[]), 0.5):
-        theta = tf.random.uniform(shape=[], minval=1, maxval=360)
-        rad = theta * pi / one_eighty
+            claim_vector = fn(claim_vector)
+            tmp_y = claim_vector[..., 0]
+            tmp_x = claim_vector[..., 1] * -1
+            claim_vector = tf.stack([tmp_y, tmp_x], axis=-1)
 
-        fn = partial(
-            apply_and_shape,
-            partial(tfa.image.rotate, angles=rad),
-        )
-        vals = tf.vectorized_map(fn, vals)
+        if translate_y and tf.math.greater(tf.random.uniform(shape=[]), 0.5):
+            dy = tf.random.uniform([], minval=0, maxval=25, dtype=tf.int32)
+            fn = partial(
+                apply_and_shape,
+                partial(tfa.image.translate, translations=[dy, 0])
+            )
 
-        if has_cv:
-            sin_theta = tf.constant(tf.sin(rad))
-            cos_theta = tf.constant(tf.cos(rad))
+            flux = fn(flux)
+            background = fn(background)
+            claim_vector = fn(claim_vector)
+            claim_map = fn(claim_map)
+            center_of_mass = fn(center_of_mass)
 
-            tmp_y = vals[2][..., 0]
-            tmp_x = vals[2][..., 1]
+        if translate_x and tf.math.greater(tf.random.uniform(shape=[]), 0.5):
+            dx = tf.random.uniform([], minval=0, maxval=25, dtype=tf.int32)
+            fn = partial(
+                apply_and_shape,
+                partial(tfa.image.translate, translations=[0, dx])
+            )
+
+            flux = fn(flux)
+            background = fn(background)
+            claim_vector = fn(claim_vector)
+            claim_map = fn(claim_map)
+            center_of_mass = fn(center_of_mass)
+
+
+        if rotate and tf.math.greater(tf.random.uniform(shape=[]), 0.5):
+            theta = tf.random.uniform(shape=[], minval=1, maxval=360)
+            rad = theta * pi / one_eighty
+
+            fn = partial(
+                apply_and_shape,
+                partial(tfa.image.rotate, angles=rad),
+            )
+
+
+            flux = fn(flux)
+            background = fn(background)
+            claim_vector = fn(claim_vector)
+            claim_map = fn(claim_map)
+            center_of_mass = fn(center_of_mass)
+
+            sin_theta = tf.sin(rad)
+            cos_theta = tf.cos(rad)
+
+            tmp_y = claim_vector[..., 0]
+            tmp_x = claim_vector[..., 1]
 
             tmp_y = sin_theta * tmp_x + cos_theta * tmp_y
             tmp_x = cos_theta * tmp_x - sin_theta * tmp_y
 
-            vals[2] = tf.stack([tmp_y, tmp_x], axis=-1)
+            claim_vector = tf.stack([tmp_y, tmp_x], axis=-1)
 
-    return vals
+    return (
+        flux,
+        background,
+        claim_vector,
+        claim_map,
+        center_of_mass,
+    )
+
 
 @gin.configurable()
 def get_dataset(
@@ -284,17 +482,37 @@ def get_dataset(
     dataset_train = (
         train_idxs.interleave(
             partial(get_files, TRAIN_DATA_PATH, instance_mode),
-            cycle_length=batch_size,  # number of files to process in parallel
+            cycle_length=1,  # number of files to process in parallel
             block_length=1,  # how many items to produce from a single file
-            num_parallel_calls=2,
+            num_parallel_calls=1,
         )
-        .with_options(options)
+        # train_idxs.map(partial(get_files, TRAIN_DATA_PATH, instance_mode))
+        # .with_options(options)
         .repeat()
+        #.map(partial(augment, is_training=False))
+        .map(pure_augment)
         .shuffle(batch_size + 1)
         #.map(preprocess)
-        .map(augment)
         .batch(batch_size)
     )
+
+    dataset_train = train_idxs.interleave(
+        partial(get_files, TRAIN_DATA_PATH, instance_mode),
+        cycle_length=1,  # number of files to process in parallel
+        block_length=1,  # how many items to produce from a single file
+        num_parallel_calls=1,
+    )
+    # print("TRAINING: ", dataset_train)
+    dataset_train = dataset_train.with_options(options)
+    # print("TRAINING: ", dataset_train)
+    dataset_train = dataset_train.repeat()
+    # print("TRAINING: ", dataset_train)
+    dataset_train = dataset_train.map(pure_augment)
+    # print("TRAINING: ", dataset_train)
+    dataset_train = dataset_train.shuffle(batch_size + 1)
+    # print("TRAINING: ", dataset_train)
+    dataset_train = dataset_train.batch(batch_size)
+    # print("TRAINING: ", dataset_train)
 
     test_idxs = get_idxs(TEST_DATA_PATH)
     n_test = len(test_idxs)
@@ -311,15 +529,15 @@ def get_dataset(
     dataset_test = (
         test_idxs.interleave(
             partial(get_files, TEST_DATA_PATH, instance_mode),
-            cycle_length=batch_size,  # number of files to process in parallel
+            cycle_length=1,  # number of files to process in parallel
             block_length=1,  # how many items to produce from a single file
-            num_parallel_calls=2,
+            num_parallel_calls=1,
         )
         .with_options(options)
         .repeat()
         #.shuffle(batch_size + 1)
         #.map(preprocess)
-        #.map(augment)
+        #.map(pure_augment)
         .batch(batch_size)
     )
 
@@ -333,10 +551,14 @@ def get_dataset(
 
 
 if __name__=="__main__":
-    dataset = get_dataset(1)
+    dataset = get_dataset(1, "v5")
 
     (train, num_train, test, num_test) = dataset
 
+    print("\n\n\n IN MAIN: ", train)
+
     for i, t in enumerate(train):
+        print("\n\n in loop: ", t)
+
         for _i in t:
             print(_i.shape)
