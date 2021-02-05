@@ -88,12 +88,12 @@ def get_model(
         instance = dec_instance(reversed_outputs)
 
         return Model([inputs], [bkg] + instance)
-    elif instance_mode=="v5":
+    elif instance_mode in ["v5", "v6"]:
         combined_outs = instance_decoder_v5()(reversed_outputs)
         return Model([inputs], combined_outs)
     else:
         raise ValueError(
-            "Instance mode should be one of ['v1', 'v2', 'v3', 'v4', 'v5']"
+            "Instance mode should be one of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6']"
         )
 
 

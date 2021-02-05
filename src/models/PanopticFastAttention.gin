@@ -44,10 +44,10 @@ src.features.data_provider.augment.flip_x = True
 src.features.data_provider.augment.translate_y = True
 src.features.data_provider.augment.translate_x = True
 src.features.data_provider.augment.rotate = True
-src.features.data_provider.augment.instance_mode = "v5"
+src.features.data_provider.augment.instance_mode = "v6"
 
 src.features.data_provider.get_dataset.batch_size = 16
-src.features.data_provider.get_dataset.instance_mode = "v5"
+src.features.data_provider.get_dataset.instance_mode = "v6"
 # src.features.data_provider ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
@@ -74,7 +74,7 @@ src.models.losses.loss_function.lambda_semantic = 0.1
 src.models.losses.loss_function.lambda_claim_vector = 0.25
 src.models.losses.loss_function.lambda_claim_map = 15.0
 src.models.losses.loss_function.lambda_center_of_mass = 0.1
-src.models.losses.loss_function.instance_mode = "v5"
+src.models.losses.loss_function.instance_mode = "v6"
 
 # src.models.losses ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -85,13 +85,13 @@ src.models.metric_logging.update_metrics.lambda_semantic = 0.1
 src.models.metric_logging.update_metrics.lambda_claim_vector = 0.25
 src.models.metric_logging.update_metrics.lambda_claim_map = 15.0
 src.models.metric_logging.update_metrics.lambda_center_of_mass = 0.1
-src.models.metric_logging.update_metrics.instance_mode = "v5"
+src.models.metric_logging.update_metrics.instance_mode = "v6"
 # src.models.metric_logging ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
 # src.models.PanopticFastAttention vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 src.models.PanopticFastAttention.get_model.input_shape = [256, 256, 4]
-src.models.PanopticFastAttention.get_model.instance_mode = "v5"
+src.models.PanopticFastAttention.get_model.instance_mode = "v6"
 
 src.models.PanopticFastAttention.encoder.input_shape = [256, 256, 4]
 src.models.PanopticFastAttention.encoder.filters = [32, 62, 128, 256, 512, 1024]
@@ -114,6 +114,7 @@ src.models.PanopticFastAttention.instance_decoder_v4.output_shape = [256, 256, 4
 src.models.PanopticFastAttention.instance_decoder_v4.filters = [32, 64, 128, 256]
 src.models.PanopticFastAttention.instance_decoder_v4.n = 5
 
+# v5 and v6 use the same architecture, but different encoding schemes
 src.models.PanopticFastAttention.instance_decoder_v5.output_shape = [256, 256, 4]
 src.models.PanopticFastAttention.instance_decoder_v5.filters = [32, 62, 128, 256, 512, 1024]
 src.models.PanopticFastAttention.instance_decoder_v5.n_classes = 1

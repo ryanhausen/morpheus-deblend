@@ -54,8 +54,10 @@ def grab_files_py(parent_dir:str, instance_mode:str, idx:int):
         fnames = ["flux", "background", "claim_vectors", "claim_maps", "center_of_mass"]
     elif instance_mode=="v5":
         fnames = ["flux", "background", "claim_vectors", "claim_maps", "center_of_mass"]
+    elif instance_mode=="v6":
+        fnames = ["flux", "background", "claim_vectors", "claim_maps", "center_of_mass"]
     else:
-        raise ValueError("instance_mode must be one of ['v1', 'v2', 'v3', 'v4']")
+        raise ValueError("instance_mode must be one of ['v1', 'v2', 'v3', 'v4', 'v6']")
 
     arrays = list(
         map(
@@ -129,7 +131,7 @@ def get_files(parent_dir:str, instance_mode:str, item_idx:tf.data.Dataset):
         center_of_mass.set_shape([256, 256, 1])
 
         vals = (flux, background, claim_vector, claim_map, center_of_mass)
-    elif instance_mode in ["v4", "v5"]:
+    elif instance_mode in ["v4", "v5", "v6"]:
         n = 5
         (
             flux,
@@ -169,7 +171,7 @@ def get_files(parent_dir:str, instance_mode:str, item_idx:tf.data.Dataset):
 
     else:
         raise ValueError(
-            "instance_mode must be one of ['v1', 'v2', 'v3', 'v4', 'v5']"
+            "instance_mode must be one of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6']"
         )
 
     # print([type(v) for v in vals])
@@ -178,7 +180,7 @@ def get_files(parent_dir:str, instance_mode:str, item_idx:tf.data.Dataset):
 
     return vals
 
-@tf.function(experimental_relax_shapes=True)
+#@tf.function(experimental_relax_shapes=True)
 def apply_and_shape(fn, inputs):
     shape = tf.shape(inputs)
     flat_channels = tf.reshape(inputs, [shape[0], shape[1], -1])
@@ -343,7 +345,7 @@ def augment(
     elif instance_mode in ["v2"]:
         flux, background, claim_map, center_of_mass = vals
         has_cv = False
-    elif instance_mode in ["v5"]:
+    elif instance_mode in ["v5", "v6"]:
         n = 5
         cv_idx = 5 + int(4*n*2)
         cm_idx = cv_idx + 4 * n
@@ -352,10 +354,9 @@ def augment(
         claim_vector = tf.reshape(vals[..., 5:cv_idx], [256, 256, 4, n, 2])
         claim_map = tf.reshape(vals[..., cv_idx:cm_idx], [256, 256, 4, n])
         center_of_mass = vals[..., -1:]
-        # has_cv = True
     else:
         raise ValueError(
-            "instance_mode must be one of ['v1', 'v2', 'v3', 'v4', 'v5']"
+            "instance_mode must be one of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6']"
         )
 
     if is_training:
@@ -551,7 +552,7 @@ def get_dataset(
 
 
 if __name__=="__main__":
-    dataset = get_dataset(1, "v5")
+    dataset = get_dataset(1, "v6")
 
     (train, num_train, test, num_test) = dataset
 

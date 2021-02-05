@@ -179,7 +179,7 @@ def loss_function(
     instance_mode:str = "v1",
 ) -> float:
 
-    if instance_mode in ["v1", "v4", "v5"]:
+    if instance_mode in ["v1", "v4", "v5", "v6"]:
         flux, y_bkg, y_claim_vector, y_claim_map, y_com = inputs
         yh_bkg, yh_claim_vector, yh_claim_map, yh_com = outputs
 
@@ -209,7 +209,7 @@ def loss_function(
             + lambda_center_of_mass * center_of_mass_loss(y=y_com, yh=yh_com)
         )
     else:
-        raise ValueError("instance_mode must be equal to 'v1', 'v2', or 'v3'")
+        raise ValueError("instance_mode must be equal to 'v1', 'v2', 'v3', 'v4', 'v5', 'v6'")
 
 
     return loss

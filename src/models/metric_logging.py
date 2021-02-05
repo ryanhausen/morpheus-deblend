@@ -49,13 +49,11 @@ class MeanOfMeans(tf.keras.metrics.Metric):
     def result(self):
         return self.sum / self.n
 
-# TODO: These need be changed to weighted means
 _semantic_loss = MeanOfMeans()
 _claim_vector_loss = MeanOfMeans()
 _claim_map_loss = MeanOfMeans()
 _center_of_mass_loss = MeanOfMeans()
 _total_loss = MeanOfMeans()
-
 
 def scale_image(data):
 
@@ -102,21 +100,21 @@ def update_metrics(
 
 
 
-    if instance_mode in ["v1", "v3", "v4", "v5"]:
+    if instance_mode in ["v1", "v3", "v4", "v5", "v6"]:
         flux, y_bkg, y_claim_vector, y_claim_map, y_com = inputs
         yh_bkg, yh_claim_vector, yh_claim_map, yh_com = outputs
     elif instance_mode=="v2":
         flux, y_bkg, y_claim_map, y_com = inputs
         yh_bkg, yh_claim_map, yh_com = outputs
     else:
-        raise ValueError("instance_mode must in ['v1', 'v2', 'v3', 'v4', 'v5']")
+        raise ValueError("instance_mode must in ['v1', 'v2', 'v3', 'v4', 'v5', 'v6']")
 
     l_semantic = losses.semantic_loss(y=y_bkg, yh=yh_bkg)
     l_cm = losses.claim_map_loss(bkg=y_bkg, y=y_claim_map, yh=yh_claim_map)
     l_com = losses.center_of_mass_loss(y=y_com, yh=yh_com)
     l_total = losses.loss_function(inputs, outputs)
 
-    if instance_mode in ["v1", "v4", "v5"]:
+    if instance_mode in ["v1", "v4", "v5", "v6"]:
         l_cv = losses.claim_vector_loss(
             bkg=y_bkg,
             y_claim_map=y_claim_map,
@@ -138,7 +136,7 @@ def update_metrics(
             ("Loss", l_total),
         ]
 
-        if instance_mode in ["v1", "v3", "v4", "v5"]:
+        if instance_mode in ["v1", "v3", "v4", "v5", "v6"]:
             metrics.append(
                 ("ClaimVectorLoss", l_cv * lambda_claim_vector),
             )
@@ -212,7 +210,7 @@ def update_metrics(
             )
 
         # log color vector representations
-        if instance_mode == "v5":
+        if instance_mode in ["v5", "v6"]:
             cv_cm_vals = [
                 (
                     y_claim_vector.numpy()[-1, ...],
@@ -280,7 +278,7 @@ def update_metrics(
         _center_of_mass_loss.update_state(l_com * lambda_center_of_mass, n)
         _total_loss.update_state(l_total, n)
 
-        if instance_mode in ["v1", "v3", "v4", "v5"]:
+        if instance_mode in ["v1", "v3", "v4", "v5", "v6"]:
             _claim_vector_loss.update_state(l_cv * lambda_claim_vector, n)
 
 
@@ -292,7 +290,7 @@ def update_metrics(
                 ("Loss", _total_loss),
             ]
 
-            if instance_mode in ["v1", "v3", "v4", "v5"]:
+            if instance_mode in ["v1", "v3", "v4", "v5", "v6"]:
                 metrics.append(
                     ("ClaimVectorLoss", _claim_vector_loss),
                 )
@@ -370,7 +368,7 @@ def update_metrics(
                 )
 
             # log color vector representations
-            if instance_mode == "v5":
+            if instance_mode in ["v5", "v6"]:
                 cv_cm_vals = [
                     (
                         y_claim_vector.numpy()[-1, ...],
