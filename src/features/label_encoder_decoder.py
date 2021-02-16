@@ -614,6 +614,327 @@ def decode_n_closest_fw_sources(
 # ==============================================================================
 
 
+
+
+
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# ==============================================================================
+# Closest n-sources claim vector avg map
+# ==============================================================================
+# ENCODER vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+def get_n_closest_avg_claim_vector_single_pixel(
+    claim_vectors: np.ndarray,      # [h, w, n, 2]
+    claim_map: np.ndarray,          # [h, w, n]
+    model_vals: List[np.ndarray],   # list(n)
+    src_centers: np.ndarray,        # [n, 2]
+    n: int,
+    y: int,
+    x: int,
+) -> None:
+    relative_vectors = src_centers - np.array([y, x]) # [n_srcs, 2]
+    relative_distances = np.linalg.norm(relative_vectors, axis=-1) # [n_srcs,]
+    raw_closest_sources = np.argsort(relative_distances)[:n] # [n, ]
+
+    num_pad = n - raw_closest_sources.shape[0]
+    if num_pad > 0:
+        n_closest_sources = raw_closest_sources
+    else:
+        n_closest_sources = np.pad(raw_closest_sources, (0, num_pad), mode="edge")
+
+    selected_srcs = relative_vectors[n_closest_sources]
+
+    claim_vectors[y, x, ...] = selected_srcs
+
+    def get_normed_src_fluxes(band:int):
+        src_fluxes = np.array([max(model_vals[i][band, y, x], 0) for i in raw_closest_sources])
+
+        sum_flux = src_fluxes.sum()
+        if sum_flux > 0:
+            normed_flux = src_fluxes / sum_flux
+        else:
+            normed_flux = np.ones([n], dtype=np.float32) / n
+
+        return normed_flux
+
+    n_bands = model_vals[0].shape[0]
+    avg_flux_contrib = np.array(list(map(get_normed_src_fluxes, range(n_bands)))).mean(axis=0)
+    normed_avg_flux_contrib = avg_flux_contrib / avg_flux_contrib.sum()
+
+    idxs, counts = np.unique(n_closest_sources, return_counts=True)
+    coefs = np.reciprocal(counts.astype(np.float32))
+
+
+
+    claim = np.array(list(map(
+        lambda i: coefs[idxs==i][0] * normed_avg_flux_contrib[i==raw_closest_sources][0],
+        n_closest_sources
+    )))
+
+    claim_map[y, x, ...] = claim
+
+def get_n_closest_avg_claim_vector(
+    source_locations: np.ndarray,
+    bkg: np.ndarray,
+    bhw: Tuple[int, int, int],
+    model_src_vals: List[np.ndarray],
+    n: int,
+) -> Tuple[np.ndarray, np.ndarray]: # [h, w, n], [h, w, n, 2]
+    _, y, x = bhw
+
+    src_ys, src_xs = np.nonzero(source_locations)
+    src_centers = np.array([src_ys, src_xs]).T  # [n, 2]
+
+    idxs = product(range(y), range(x))
+
+    claim_vector = np.zeros([y, x, n, 2], dtype=np.float32)
+    claim_map = np.zeros([y, x, n], dtype=np.float32)
+
+    encode_f = partial(
+        get_n_closest_avg_claim_vector_single_pixel,
+        claim_vector,
+        claim_map,
+        model_src_vals,
+        src_centers,
+        n,
+    )
+
+    for _ in starmap(encode_f, idxs):
+        pass
+
+    claim_vector, claim_map
+# ENCODER ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+
+# DECODER vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+def decode_n_closest_avg_claim_vector_single_pixel(
+    output:np.ndarray,
+    flux:np.ndarray,
+    claim_vector:np.ndarray,
+    claim_map:np.ndarray,
+    src_centers:np.ndarray,
+    y:int,
+    x:int,
+    b:int,
+) -> None:
+    pixel_flux = flux[y, x, b]
+    pixel_vectors = claim_vector[y, x, ...].copy() # [n, 2]
+    pixel_claim_map = claim_map[y, x, ...].copy() # [n,]
+
+    relative_centers = src_centers - np.array([y, x])
+
+    distances = euclidean_distances(pixel_vectors, relative_centers) #[n, n_src_centers]
+    closest_srcs = np.argmin(distances, axis=1)
+
+    distributed_flux = pixel_flux * pixel_claim_map
+
+    def update_output(src_idx:int, flx:float):
+        output[src_idx, y, x, b] += flx
+
+    for _ in starmap(update_output, zip(closest_srcs, distributed_flux)):
+        pass
+
+
+def decode_n_closest_fw_sources(
+    flux:np.ndarray,
+    claim_vector:np.ndarray,
+    claim_map:np.ndarray,
+    src_centers:np.ndarray
+) -> np.ndarray:
+    y, x, b = flux.shape
+    output = np.zeros([src_centers.shape[0], y, x, b], dtype=np.float32)
+
+    idxs = product(range(y), range(x), range(b))
+
+    decode_f = partial(
+        decode_n_closest_avg_claim_vector_single_pixel,
+        output,
+        flux,
+        claim_vector,
+        claim_map,
+        src_centers,
+    )
+
+    for _ in starmap(decode_f, tqdm(idxs, total=y*x*b)):
+        pass
+
+    return output
+# DECODER ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# ==============================================================================
+# Closest n-sources claim vector avg map
+# ==============================================================================
+
+
+
+
+# ==============================================================================
+# Closest n-sources claim vector limit bands
+# ==============================================================================
+# ENCODER vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+def get_n_closest_claim_vector_map_limit_bands_single_pixel(
+    claim_vectors: np.ndarray,     # [h, w, n, 2]
+    claim_map: np.ndarray,         # [h, w, b, n]
+    model_vals: List[np.ndarray],
+    src_centers: np.ndarray,       # [n_srcs, 2]
+    n: int,
+    n_bands: int,
+    y: int,
+    x: int,
+) -> None:
+    # Claim vectors ============================================================
+    relative_vectors = src_centers - np.array([y, x]) # [n_srcs, 2]
+    relative_distances = np.linalg.norm(relative_vectors, axis=-1) # [n_srcs,]
+    raw_closest_sources = np.argsort(relative_distances)[:n] # [min(n_srcs, n), ]
+
+    num_pad = n - raw_closest_sources.shape[0]
+    if num_pad > 0:
+        n_closest_sources = np.pad(raw_closest_sources, (0, num_pad), mode="edge") # [n,]
+    else:
+        n_closest_sources = raw_closest_sources # [n,]
+
+    selected_srcs = relative_vectors[n_closest_sources] # [n, 2]
+
+    claim_vectors[y, x, ...] = selected_srcs
+    # Claim vectors ============================================================
+
+    # Claim maps ===============================================================
+    raw_n = raw_closest_sources.shape[0]
+    def get_normed_src_fluxes(band:int):
+        src_fluxes = np.array([max(model_vals[i][band, y, x], 0) for i in raw_closest_sources])
+
+        sum_flux = src_fluxes.sum()
+        if sum_flux > 0:
+            normed_flux = src_fluxes / sum_flux
+        else:
+            normed_flux = np.ones([raw_n], dtype=np.float32) / raw_n
+
+        return normed_flux
+
+    band_normed_flux = np.array(list(map(get_normed_src_fluxes, range(n_bands)))) # [n_bands, min(n_src, n)]
+
+    if num_pad > 0:
+        padded_band_normed_flux = np.pad(band_normed_flux, ((0, 0), (0, num_pad)), mode="edge")
+    else:
+        padded_band_normed_flux = band_normed_flux
+
+    idxs, counts = np.unique(n_closest_sources, return_counts=True) # [min(n_srcs, n), ], [min(n_srcs, n), ]
+    coefs = np.reciprocal(counts.astype(np.float32)) # [min(n_srcs, n), ]
+
+    coef_map = np.array([coefs[idxs==i][0] for i in n_closest_sources])[np.newaxis, :] #[1, n]
+
+    try:
+        claim = padded_band_normed_flux * coef_map
+    except:
+        print("raw_closest_sources: ", raw_closest_sources.shape)
+        print("selected_srcs_shape: ", selected_srcs.shape)
+        print("band_normed_flux: ", band_normed_flux.shape)
+        print("padded_band_normed_flux: ", padded_band_normed_flux.shape)
+        print("coefs: ", coefs.shape)
+        print("coef_map: ", coef_map.shape)
+        raise ValueError("Things Broke! Oh Man!")
+
+
+    claim_map[y, x, ...] = claim
+    # Claim maps ===============================================================
+
+
+def get_n_closest_claim_vector_map_limit_bands(
+    source_locations: np.ndarray,
+    bkg: np.ndarray,
+    bhw: Tuple[int, int, int],
+    model_src_vals: List[np.ndarray],
+    n: int,
+    n_bands:int,
+) -> Tuple[np.ndarray, np.ndarray]: # [h, w, bands, n], [h, w, bands, n, 2]
+
+    b, y, x = bhw
+
+    src_ys, src_xs = np.nonzero(source_locations)
+    src_centers = np.array([src_ys, src_xs]).T  # [n, 2]
+
+    idxs = product(range(y), range(x))
+
+    claim_vector = np.zeros([y, x, n, 2], dtype=np.float32)
+    claim_map = np.zeros([y, x, n_bands, n], dtype=np.float32)
+
+    encode_f = partial(
+        get_n_closest_claim_vector_map_limit_bands_single_pixel,
+        claim_vector,
+        claim_map,
+        model_src_vals,
+        src_centers,
+        n,
+        n_bands,
+    )
+
+    for _ in starmap(encode_f, idxs):
+        pass
+
+    return claim_vector, claim_map
+# ENCODER ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+# DECODER vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
+def decode_n_closest_claim_vector_map_limit_bands_single_pixel(
+    output:np.ndarray,
+    flux:np.ndarray,
+    claim_vector:np.ndarray,
+    claim_map:np.ndarray,
+    src_centers:np.ndarray,
+    y:int,
+    x:int,
+    b:int,
+) -> None:
+    pixel_flux = flux[y, x, b]
+    pixel_vectors = claim_vector[y, x, b, ...].copy() # [n, 2]
+    pixel_claim_map = claim_map[y, x, b, ...].copy() # [n,]
+
+    relative_centers = src_centers - np.array([y, x])
+
+    distances = euclidean_distances(pixel_vectors, relative_centers) #[n, n_src_centers]
+    closest_srcs = np.argmin(distances, axis=1)
+
+    distributed_flux = pixel_flux * pixel_claim_map
+
+    def update_output(src_idx:int, flx:float):
+        output[src_idx, y, x, b] += flx
+
+    for _ in starmap(update_output, zip(closest_srcs, distributed_flux)):
+        pass
+
+def decode_n_closest_claim_vector_map_limit_bands(
+    flux:np.ndarray,
+    claim_vector:np.ndarray,
+    claim_map:np.ndarray,
+    src_centers:np.ndarray
+) -> np.ndarray:
+    y, x, b = flux.shape
+    output = np.zeros([src_centers.shape[0], y, x, b], dtype=np.float32)
+
+    idxs = product(range(y), range(x), range(b))
+
+    decode_f = partial(
+        decode_n_closest_fw_sources_single_pixel,
+        output,
+        flux,
+        claim_vector,
+        claim_map,
+        src_centers,
+    )
+
+    for _ in starmap(decode_f, tqdm(idxs, total=y*x*b)):
+        pass
+
+    return output
+# DECODER ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+# ==============================================================================
+# Closest n-sources claim vector limit bands
+# ==============================================================================
+
+
+
+
+
 def get_claim_vector_image_and_map(
     source_locations: np.ndarray,
     bkg: np.ndarray,

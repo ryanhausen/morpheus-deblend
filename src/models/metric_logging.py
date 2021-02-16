@@ -95,37 +95,39 @@ def update_metrics(
     lambda_center_of_mass: float,
     instance_mode:str,
  ) -> None:
+    n_instance = 3
 
     epoch_progress = idx / batches_per_epoch
 
 
 
-    if instance_mode in ["v1", "v3", "v4", "v5", "v6"]:
+    if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7"]:
         flux, y_bkg, y_claim_vector, y_claim_map, y_com = inputs
         yh_bkg, yh_claim_vector, yh_claim_map, yh_com = outputs
     elif instance_mode=="v2":
         flux, y_bkg, y_claim_map, y_com = inputs
         yh_bkg, yh_claim_map, yh_com = outputs
     else:
-        raise ValueError("instance_mode must in ['v1', 'v2', 'v3', 'v4', 'v5', 'v6']")
+        raise ValueError("instance_mode must in ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7']")
 
-    l_semantic = losses.semantic_loss(y=y_bkg, yh=yh_bkg)
-    l_cm = losses.claim_map_loss(bkg=y_bkg, y=y_claim_map, yh=yh_claim_map)
-    l_com = losses.center_of_mass_loss(y=y_com, yh=yh_com)
+    l_semantic = losses.semantic_loss(y=y_bkg, yh=yh_bkg, flux=flux)
+    l_cm = losses.claim_map_loss(bkg=y_bkg, y=y_claim_map, yh=yh_claim_map, flux=flux)
+    l_com = losses.center_of_mass_loss(y=y_com, yh=yh_com, flux=flux)
     l_total = losses.loss_function(inputs, outputs)
 
-    if instance_mode in ["v1", "v4", "v5", "v6"]:
+    if instance_mode in ["v1", "v4", "v5", "v6", "v7"]:
         l_cv = losses.claim_vector_loss(
             bkg=y_bkg,
             y_claim_map=y_claim_map,
             y=y_claim_vector,
-            yh=yh_claim_vector
+            yh=yh_claim_vector,
+            flux=flux,
         )
     if instance_mode=="v3":
         l_cv = losses.discrete_claim_vector_loss(
             bkg=y_bkg,
             y=y_claim_vector,
-            yh=yh_claim_vector
+            yh=yh_claim_vector,
         )
 
     if is_training:
@@ -136,7 +138,7 @@ def update_metrics(
             ("Loss", l_total),
         ]
 
-        if instance_mode in ["v1", "v3", "v4", "v5", "v6"]:
+        if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7"]:
             metrics.append(
                 ("ClaimVectorLoss", l_cv * lambda_claim_vector),
             )
@@ -145,14 +147,14 @@ def update_metrics(
             pass
 
         experiment.log_image(
-            y_bkg[-1,...],
+            np.flipud(y_bkg[-1,...]),
             "InputBackground",
             image_colormap="Greys",
             image_minmax=(0, 1)
         )
 
         experiment.log_image(
-            expit(yh_bkg[-1,...]),
+            np.flipud(expit(yh_bkg[-1,...])),
             "OutputBackground",
             image_colormap="Greys",
             image_minmax=(0, 1)
@@ -160,21 +162,21 @@ def update_metrics(
 
 
         experiment.log_image(
-            y_com[-1,...],
+            np.flipud(y_com[-1,...]),
             "InputCenterOfMass",
             image_colormap="Greys",
             image_minmax=(0, 1)
         )
 
         experiment.log_image(
-            yh_com[-1,...],
+            np.flipud(yh_com[-1,...]),
             "OutputCenterOfMass",
             image_colormap="Greys",
             image_minmax=(0, 1)
         )
 
         experiment.log_image(
-            scale_image(flux[-1,:, :, 0].numpy()),
+            np.flipud(scale_image(flux[-1,:, :, 0].numpy())),
             "Input-H",
             image_colormap="Greys"
         )
@@ -182,35 +184,35 @@ def update_metrics(
         # log claim map images
         if instance_mode=="v2":
             experiment.log_image(
-                y_claim_map[-1, :, :, 0, 0],
+                np.flipud(y_claim_map[-1, :, :, 0, 0]),
                 "InputClaimMapClose1",
                 image_colormap="Greys",
                 image_minmax=(0, 1)
             )
 
             experiment.log_image(
-                yh_claim_map[-1, :, :, 0, 0],
+                np.flipud(yh_claim_map[-1, :, :, 0, 0]),
                 "OutputClaimMapClose1",
                 image_colormap="Greys",
                 image_minmax=(0, 1)
             )
 
             experiment.log_image(
-                y_claim_map[-1, :, :, 0, 1],
+                np.flipud(y_claim_map[-1, :, :, 0, 1]),
                 "InputClaimMapClose2",
                 image_colormap="Greys",
                 image_minmax=(0, 1)
             )
 
             experiment.log_image(
-                yh_claim_map[-1, :, :, 0, 1],
+                np.flipud(yh_claim_map[-1, :, :, 0, 1]),
                 "OutputClaimMapClose2",
                 image_colormap="Greys",
                 image_minmax=(0, 1)
             )
 
         # log color vector representations
-        if instance_mode in ["v5", "v6"]:
+        if instance_mode in ["v5", "v6", "v7"]:
             cv_cm_vals = [
                 (
                     y_claim_vector.numpy()[-1, ...],
@@ -227,12 +229,12 @@ def update_metrics(
             for name, (cv, cm) in zip(names, cv_cm_vals):
                 f, axes = plt.subplots(
                     ncols=2,
-                    nrows=5,
+                    nrows=n_instance,
                     figsize=(8, 20),
                 )
 
                 for i, ax in enumerate(axes.flat):
-                    single_cv = cv[:, :, 0, i//2, :].copy()
+                    single_cv = cv[:, :, i//2, :].copy()
                     single_cv[:, :, 0]  = single_cv[:, :, 0] * -1
 
                     # claim vector
@@ -278,7 +280,7 @@ def update_metrics(
         _center_of_mass_loss.update_state(l_com * lambda_center_of_mass, n)
         _total_loss.update_state(l_total, n)
 
-        if instance_mode in ["v1", "v3", "v4", "v5", "v6"]:
+        if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7"]:
             _claim_vector_loss.update_state(l_cv * lambda_claim_vector, n)
 
 
@@ -290,7 +292,7 @@ def update_metrics(
                 ("Loss", _total_loss),
             ]
 
-            if instance_mode in ["v1", "v3", "v4", "v5", "v6"]:
+            if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7"]:
                 metrics.append(
                     ("ClaimVectorLoss", _claim_vector_loss),
                 )
@@ -304,14 +306,14 @@ def update_metrics(
 
 
             experiment.log_image(
-                y_bkg[-1,...],
+                np.flipud(y_bkg[-1,...]),
                 "InputBackground",
                 image_colormap="Greys",
                 image_minmax=(0, 1)
             )
 
             experiment.log_image(
-                expit(yh_bkg[-1,...]),
+                np.flipud(expit(yh_bkg[-1,...])),
                 "OutputBackground",
                 image_colormap="Greys",
                 image_minmax=(0, 1)
@@ -319,56 +321,56 @@ def update_metrics(
 
 
             experiment.log_image(
-                y_com[-1,...],
+                np.flipud(y_com[-1,...]),
                 "InputCenterOfMass",
                 image_colormap="Greys",
                 image_minmax=(0, 1)
             )
 
             experiment.log_image(
-                yh_com[-1,...],
+                np.flipud(yh_com[-1,...]),
                 "OutputCenterOfMass",
                 image_colormap="Greys",
                 image_minmax=(0, 1)
             )
 
             experiment.log_image(
-                scale_image(flux[-1,:, :, 0].numpy()),
+                np.flipud(scale_image(flux[-1,:, :, 0].numpy())),
                 "Input-H",
                 image_colormap="Greys"
             )
 
             if instance_mode=="v2":
                 experiment.log_image(
-                    y_claim_map[-1, :, :, 0, 0],
+                    np.flipud(y_claim_map[-1, :, :, 0, 0]),
                     "InputClaimMapClose1",
                     image_colormap="Greys",
                     image_minmax=(0, 1)
                 )
 
                 experiment.log_image(
-                    yh_claim_map[-1, :, :, 0, 0],
+                    np.flipud(yh_claim_map[-1, :, :, 0, 0]),
                     "OutputClaimMapClose1",
                     image_colormap="Greys",
                     image_minmax=(0, 1)
                 )
 
                 experiment.log_image(
-                    y_claim_map[-1, :, :, 0, 1],
+                    np.flipud(y_claim_map[-1, :, :, 0, 1]),
                     "InputClaimMapClose2",
                     image_colormap="Greys",
                     image_minmax=(0, 1)
                 )
 
                 experiment.log_image(
-                    yh_claim_map[-1, :, :, 0, 1],
+                    np.flipud(yh_claim_map[-1, :, :, 0, 1]),
                     "OutputClaimMapClose2",
                     image_colormap="Greys",
                     image_minmax=(0, 1)
                 )
 
             # log color vector representations
-            if instance_mode in ["v5", "v6"]:
+            if instance_mode in ["v5", "v6", "v7"]:
                 cv_cm_vals = [
                     (
                         y_claim_vector.numpy()[-1, ...],
@@ -385,12 +387,12 @@ def update_metrics(
                 for name, (cv, cm) in zip(names, cv_cm_vals):
                     f, axes = plt.subplots(
                         ncols=2,
-                        nrows=5,
+                        nrows=n_instance,
                         figsize=(8, 20),
                     )
 
                     for i, ax in enumerate(axes.flat):
-                        single_cv = cv[:, :, 0, i//2, :].copy()
+                        single_cv = cv[:, :, i//2, :].copy()
                         single_cv[:, :, 0]  = single_cv[:, :, 0] * -1
 
                         # claim vector

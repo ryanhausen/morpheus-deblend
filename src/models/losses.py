@@ -68,12 +68,23 @@ def nan_inf_detector(y, yh, loss, name):
 def semantic_loss(
     loss_object:tf.keras.losses.Loss, # use binary crossentropy
     avg:Callable,
-    y:TensorLike, # [n, h, w, 1]
-    yh:TensorLike # [n, h, w, 1]
+    flux:TensorLike,    # [n, w, w, b]
+    y:TensorLike,       # [n, h, w, 1]
+    yh:TensorLike,      # [n, h, w, 1]
 ) -> float:
 
     loss = loss_object(y, yh) # [n, h, w]
-    per_example_loss = tf.math.reduce_mean(loss, axis=(1, 2)) #[n,]
+
+    # any pixels with less than b are missing values and we want to exclude them
+    augmentations_mask = tf.math.floordiv(
+        tf.math.reduce_sum(
+            tf.cast(tf.math.not_equal(flux, 0), tf.float32),
+            axis=-1,
+        ),
+        flux.shape[-1],
+    )
+
+    per_example_loss = tf.math.reduce_mean(loss * augmentations_mask, axis=(1, 2)) #[n,]
 
     #validated_loss = nan_inf_detector(y, yh, per_example_loss, "SemanticLoss")
     #return avg(validated_loss) # [0,]
@@ -84,27 +95,46 @@ def claim_vector_loss(
     loss_object: tf.keras.losses.Loss, # use L1
     avg:Callable,
     weighting:str,
+    flux:TensorLike,        # [n, h, w, b]
     bkg:TensorLike,         # [n, h, w, 1]
     y_claim_map:TensorLike, # [n, h, w, b, k]
-    y:TensorLike,           # [n, h, w, b, k, 2]  k=8 for a neighborhood
-    yh:TensorLike,          # [n, h, w, b, k, 2]
+    y:TensorLike,           # [n, h, w, k, 2]  k=8 for a neighborhood
+    yh:TensorLike,          # [n, h, w, k, 2]
 ) -> float:
 
-    connected_loss = loss_object(y, yh) # [n, h, w, b, k]
+    connected_loss = loss_object(y, yh) # [n, h, w, k]
 
     if weighting=="bkg":
-        band_loss = tf.math.reduce_mean(connected_loss, axis=-1) # [n, h, w, b]
+        band_loss = tf.math.reduce_mean(connected_loss, axis=-1) # [n, h, w]
         weighting = tf.math.abs(bkg[:, :, :, 0] - 1) # [n, h, w]
-        per_pixel_loss = tf.math.reduce_sum(band_loss, axis=-1) * weighting # [n, h, w]
+        per_pixel_loss = band_loss * weighting # [n, h, w]
     elif weighting=="claim_map":
         weighting = y_claim_map
         band_loss= tf.math.reduce_sum(connected_loss * y_claim_map, axis=-1) # [n, h, w, b]
         per_pixel_loss = tf.math.reduce_mean(band_loss, axis=-1) # [n, h, w]
+    elif weighting=="claim_map_and_bkg":
+        weighting = tf.constant(1, dtype=tf.float32) - bkg[:, :, :, 0] # [n, h, w]
+        band_loss= tf.math.reduce_sum(connected_loss * y_claim_map, axis=-1) # [n, h, w, b]
+        per_pixel_loss = tf.math.reduce_mean(band_loss, axis=-1) * weighting # [n, h, w]
     else:
         band_loss = tf.math.reduce_sum(connected_loss, axis=-1) # [n, h, w, b]
-        per_pixel_loss = tf.math.reduce_mean(band_loss, axis=-1) # [n, h, w]
+        per_pixel_loss = tf.math.reduce_sum(band_loss, axis=-1) * weighting # [n, h, w]
 
-    per_example_loss = tf.math.reduce_mean(per_pixel_loss, axis=(1, 2)) # [n,]
+    # any pixels with less than b are missing values and we want to exclude them
+    # augmentations_mask = (flux != 0).sum(axis=-1) // flux.shape[-1] # [n, h, w]
+    augmentations_mask = tf.math.floordiv(
+        tf.math.reduce_sum(
+            tf.cast(tf.math.not_equal(flux, 0), tf.float32),
+            axis=-1,
+        ),
+        flux.shape[-1],
+    )
+
+    per_example_loss = tf.math.reduce_mean(
+        per_pixel_loss * augmentations_mask,
+        axis=(1, 2)
+    ) # [n,]
+
     return avg(per_example_loss)
 
     # validated_loss = nan_inf_detector(y, yh, per_example_loss, "ClaimVectorLoss")
@@ -133,11 +163,25 @@ def claim_map_loss(
     loss_object: tf.keras.losses.Loss, # use Categorical crossentrioy
     avg:Callable,
     bkg:TensorLike, # [n, h, w, 1]
+    flux:TensorLike,  # [n, h, w, b]
     y:TensorLike, # [n, h, w, b, 8]
     yh:TensorLike # [n, h, w, b, 8]
 ) -> float:
 
-    weighting = tf.math.abs(bkg[:, :, :, 0] - 1) # [n, h, w]
+    # any pixels with less than b are missing values and we want to exclude them
+    # augmentations_mask = (flux != 0).sum(axis=-1) // flux.shape[-1] # [n, h, w]
+    augmentations_mask = tf.math.floordiv(
+        tf.math.reduce_sum(
+            tf.cast(tf.math.not_equal(flux, 0), tf.float32),
+            axis=-1,
+        ),
+        flux.shape[-1],
+    )
+
+
+    bkg_weighting = tf.math.abs(bkg[:, :, :, 0] - 1) # [n, h, w]
+
+    weighting = augmentations_mask * bkg_weighting
 
     band_loss = loss_object(y, yh) # [n, h, w, b]
     pixel_loss = tf.math.reduce_mean(band_loss, axis=-1) # [n, h, w]
@@ -153,11 +197,22 @@ def claim_map_loss(
 def center_of_mass_loss(
     loss_object: tf.keras.losses.Loss, # use L2 loss
     avg: Callable,
+    flux: TensorLike,
     y:TensorLike, # [n, h, w, 1]
     yh:TensorLike
 ) -> float:
+    # any pixels with less than b are missing values and we want to exclude them
+    # augmentations_mask = (flux != 0).sum(axis=-1) // flux.shape[-1] # [n, h, w]
+    augmentations_mask = tf.math.floordiv(
+        tf.math.reduce_sum(
+            tf.cast(tf.math.not_equal(flux, 0), tf.float32),
+            axis=-1,
+        ),
+        flux.shape[-1],
+    )
 
-    loss = loss_object(y, yh)
+
+    loss = loss_object(y, yh) * augmentations_mask
     per_example_loss = tf.math.reduce_mean(loss, axis=(1, 2)) # [n,]
     return avg(per_example_loss) # [0,]
 
@@ -179,15 +234,15 @@ def loss_function(
     instance_mode:str = "v1",
 ) -> float:
 
-    if instance_mode in ["v1", "v4", "v5", "v6"]:
+    if instance_mode in ["v1", "v4", "v5", "v6", "v7"]:
         flux, y_bkg, y_claim_vector, y_claim_map, y_com = inputs
         yh_bkg, yh_claim_vector, yh_claim_map, yh_com = outputs
 
         loss = (
-            lambda_semantic * semantic_loss(y=y_bkg, yh=yh_bkg)
-            + lambda_claim_vector * claim_vector_loss(bkg=y_bkg, y_claim_map=y_claim_map, y=y_claim_vector, yh=yh_claim_vector)
-            + lambda_claim_map * claim_map_loss(bkg=y_bkg, y=y_claim_map, yh=yh_claim_map)
-            + lambda_center_of_mass * center_of_mass_loss(y=y_com, yh=yh_com)
+            lambda_semantic * semantic_loss(y=y_bkg, yh=yh_bkg, flux=flux)
+            + lambda_claim_vector * claim_vector_loss(bkg=y_bkg, y_claim_map=y_claim_map, y=y_claim_vector, yh=yh_claim_vector, flux=flux)
+            + lambda_claim_map * claim_map_loss(bkg=y_bkg, y=y_claim_map, yh=yh_claim_map, flux=flux)
+            + lambda_center_of_mass * center_of_mass_loss(y=y_com, yh=yh_com, flux=flux)
         )
     elif instance_mode=="v2":
         flux, y_bkg, y_claim_map, y_com = inputs

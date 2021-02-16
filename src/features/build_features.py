@@ -379,21 +379,49 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
     # )
     # CLAIM VECTOR MAGNITUDES instance v5=======================================
 
-    # CLAIM VECTOR MAGNITUDES instance v6=======================================
-    n = 5
+    # FLUX WEIGHTED CLAIM VECTOR instance v6====================================
+    # n = 3
+    # (
+    #     claim_vector_image,
+    #     claim_map_image,
+    # ) = label_encoder_decoder.get_n_closest_fw_claim_vectors_maps(
+    #     source_locations,
+    #     background,
+    #     flux.shape,
+    #     scarlet_src_vals,
+    #     n,
+    # )
+    # FLUX WEIGHTED CLAIM VECTOR instance v6====================================
+
+    # AVG N CLOSEST AVG CMAP instance v7========================================
+    # n = 5
+    # (
+    #     claim_vector_image,
+    #     claim_map_image,
+    # ) = label_encoder_decoder.get_n_closest_avg_claim_vector(
+    #     source_locations,
+    #     background,
+    #     flux.shape,
+    #     scarlet_src_vals,
+    #     n,
+    # )
+    # AVG N CLOSEST AVG CMAP instance v7========================================
+
+    # Limit bands, n closest vectors v8=========================================
+    bands = 1
+    n = 3
     (
         claim_vector_image,
         claim_map_image,
-    ) = label_encoder_decoder.get_n_closest_fw_claim_vectors_maps(
+    ) = label_encoder_decoder.get_n_closest_claim_vector_map_limit_bands(
         source_locations,
         background,
         flux.shape,
         scarlet_src_vals,
         n,
+        bands,
     )
-    # CLAIM VECTOR MAGNITUDES instance v6=======================================
-
-
+    # Limit bands, n closest vectors v8=========================================
 
     save_data = [
         np.transpose(flux, axes=(1, 2, 0)),

@@ -55,6 +55,10 @@ Tensorlike = Union[tf.Tensor, np.ndarray]
 # v4: n claim vectors, no neighborhoods
 #
 # v5: n claim vectors, no neighborhoods, combined decoder
+#
+# v6:
+#
+# v7: n claim vectors, no neigborhoods, limit-band
 # ==============================================================================
 
 
@@ -88,12 +92,12 @@ def get_model(
         instance = dec_instance(reversed_outputs)
 
         return Model([inputs], [bkg] + instance)
-    elif instance_mode in ["v5", "v6"]:
+    elif instance_mode in ["v5", "v6", "v7"]:
         combined_outs = instance_decoder_v5()(reversed_outputs)
         return Model([inputs], combined_outs)
     else:
         raise ValueError(
-            "Instance mode should be one of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6']"
+            "Instance mode should be one of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7']"
         )
 
 
@@ -103,6 +107,7 @@ def get_model(
 def encoder(
     input_shape: Tuple[int, int, int],
     filters: List[int],
+    dropout_rate: float,
     name: str = "MorpheusDeblendEncoder",
 ) -> Model:
     """The encoder is a shared representation for both decoder modules.
@@ -124,7 +129,8 @@ def encoder(
 
     name_prefixes = (f"ResNet_{i}" for i in count(1))
     res_funcs = starmap(
-        lambda l, n: res_down(l, name_prefix=n), zip(filters, name_prefixes)
+        lambda l, n: res_down(l, dropout_rate=dropout_rate, name_prefix=n),
+        zip(filters, name_prefixes)
     )
 
     model_outputs = []
@@ -422,6 +428,7 @@ def instance_decoder_v4(
 def instance_decoder_v5(
     output_shape: Tuple[int, int],
     filters: List[int],
+    dropout_rate:float,
     n_classes:int,
     n_instances:int,
     name:str = "MorpheusDeblendDecoder"
@@ -447,7 +454,7 @@ def instance_decoder_v5(
     # final upsample and out
     fuse_funcs = list(
         map(
-            lambda f: fuse_up(f, name_prefix=name),
+            lambda f: fuse_up(f, dropout_rate=dropout_rate, name_prefix=name),
             list(reversed(filters[:-1])) + [filters[-1]],
         )
     )
@@ -468,7 +475,7 @@ def instance_decoder_v5(
 
     # INSTANCE OUT =============================================================
     claim_vectors_conv = layers.Conv2D(output_shape[2] * n_instances * 2, 1, padding="SAME")(pre_conv()(up_out))
-    claim_vectors = layers.Reshape(output_shape + [n_instances, 2])(claim_vectors_conv)
+    claim_vectors = layers.Reshape(output_shape[:-1] + [n_instances, 2])(claim_vectors_conv)
 
     claim_map_conv = layers.Conv2D(output_shape[2] * n_instances, 1, padding="SAME")(pre_conv()(up_out))
     claim_map = layers.Reshape(output_shape + [n_instances])(claim_map_conv)
@@ -487,15 +494,25 @@ def res_down(
     filters: int,
     kernel_size: int = 3,
     activation: layers.Layer = layers.ReLU,
+    dropout_rate:float = 0.5,
     name_prefix: str = "",
 ) -> LayerFunc:
 
-    conv = partial(layers.Conv2D, filters, kernel_size, padding="SAME")
+    conv = partial(
+        layers.Conv2D,
+        filters,
+        kernel_size,
+        padding="SAME",
+    )
+
+
     down_conv_f = lambda i, x: conv(strides=2, name=f"{name_prefix}_DCONV_{i}")(x)
     conv_f = lambda i, x: conv(name=f"{name_prefix}_CONV_{i}")(x)
 
+    dropout_f = lambda i, x: layers.Dropout(rate=dropout_rate, name=f"{name_prefix}_DO_{i}")(x)
+
     bn_f = lambda i, x: layers.BatchNormalization(name=f"{name_prefix}_BN_{i}")(x)
-    activation_f = lambda i, x: activation(name=f"{name_prefix}_ACT_{i}")(x)
+    activation_f = lambda i, x: activation(name=f"{name_prefix}_ACTIVATION_{i}")(x)
     add_f = lambda i, x: layers.Add(name=f"{name_prefix}_ADD_{i}")(x)
 
     def block_1(x):
@@ -505,15 +522,17 @@ def res_down(
         # x => Conv2Ds2 => BatchNorm => Activation => Conv2D => BatchNorm
         dconv_a_out = down_conv_f(one_a, x)
         bn_a_out = bn_f(one_a, dconv_a_out)
-        act_a_out = activation_f(one_a, bn_a_out)
+        do_a_out = dropout_f(one_a, bn_a_out)
+        act_a_out = activation_f(one_a, do_a_out)
         conv_a_out = conv_f(one_a, act_a_out)
         bn_a2_out = bn_f(two_a, conv_a_out)
+        do_a2_out = dropout_f(two_a, bn_a2_out)
 
         one_b = "block1b_1"
 
         # x => DownConv2D => [_ + op_result] => Activation
         dconv_b_out = down_conv_f(one_b, x)
-        add_out = add_f(one_b, [dconv_b_out, bn_a2_out])
+        add_out = add_f(one_b, [dconv_b_out, do_a2_out])
         act_b_out = activation_f(one_b, add_out)
 
         return act_b_out
@@ -525,14 +544,16 @@ def res_down(
         # x => Conv2D => BatchNorm => Activation => Conv2D => BatchNorm
         conv_a_out = conv_f(one_a, x)
         bn_a_out = bn_f(one_a, conv_a_out)
+        do_a_out = dropout_f(one_a, bn_a_out)
         act_a_out = activation_f(one_a, bn_a_out)
         conv_a2_out = conv_f(two_a, act_a_out)
         bn_a2_out = bn_f(two_a, conv_a2_out)
+        do_a2_out = dropout_f(two_a, bn_a2_out)
 
         one_b = "block2b_1"
 
         # x => [_ + bn_a2_out] => Activation
-        add_out = add_f(one_b, [bn_a2_out, x])
+        add_out = add_f(one_b, [do_a2_out, x])
         act_b_out = activation_f(one_b, add_out)
 
         return act_b_out
@@ -542,7 +563,10 @@ def res_down(
 
 @gin.configurable(allowlist=["activation"])
 def fuse_up(
-    filters: int, activation: layers.Layer = layers.ReLU, name_prefix: str = "",
+    filters: int,
+    activation: layers.Layer = layers.ReLU,
+    dropout_rate:float = 0.5,
+    name_prefix: str = "",
 ) -> LayerFunc:
     def op(x, y):
         if x is None:
@@ -550,7 +574,8 @@ def fuse_up(
         else:
             up_sampled = layers.UpSampling2D()(x)
             activated = activation()(up_sampled)
-            fused = layers.Add()([activated, y])
+            dropped = layers.Dropout(dropout_rate)(activated)
+            fused = layers.Add()([dropped, y])
 
         conv = layers.Conv2D(filters, (3, 3), padding="SAME")(fused)
         return layers.BatchNormalization()(conv)
