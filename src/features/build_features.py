@@ -304,6 +304,7 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
     wcs: WCS,
     img_size: int,
     save_dir: str,
+    scarlet_dir: str,
     iyx: Tuple[int, Tuple[int, int]],
 ) -> None:
     i, (y, x) = iyx
@@ -327,7 +328,7 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
 
     model_psf = scarlet.GaussianPSF(sigma=(0.8,) * 4)
 
-    scarlet_file_path = os.path.join(DATA_PATH_PROCESSED_SCARLET, f"{i}.fits")
+    scarlet_file_path = os.path.join(scarlet_dir, f"{i}.fits")
     if os.path.exists(scarlet_file_path):
         scarlet_src_vals = [arr for arr in fits.getdata(scarlet_file_path)]
     else:
@@ -602,7 +603,13 @@ def main(img_size: int) -> None:
             #mp_array[:] = data[:]
 
             train_crop_f = partial(
-                crop_convert_and_save, None, psfs, wcs, img_size, DATA_PATH_PROCESSED_TRAIN
+                crop_convert_and_save,
+                None,
+                psfs,
+                wcs,
+                img_size,
+                DATA_PATH_PROCESSED_TRAIN,
+                os.path.join(DATA_PATH_PROCESSED_SCARLET, "train")
             )
 
             with Pool(30) as p:
@@ -613,7 +620,13 @@ def main(img_size: int) -> None:
 
 
             test_crop_f = partial(
-                crop_convert_and_save, None, psfs, wcs, img_size, DATA_PATH_PROCESSED_TEST
+                crop_convert_and_save,
+                None,
+                psfs,
+                wcs,
+                img_size,
+                DATA_PATH_PROCESSED_TEST,
+                os.path.join(DATA_PATH_PROCESSED_SCARLET, "test")
             )
 
             with Pool(30) as p:

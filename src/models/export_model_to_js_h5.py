@@ -33,38 +33,38 @@ MODELS_DIR = os.path.join(os.path.dirname(__file__), "../../models")
 def main(model_id:str):
     model_dir = os.path.join(MODELS_DIR, model_id)
 
-    model_input_shape = [256, 256, 4]
+    model_input_shape = [256, 256, 1]
 
-    encoder_filters = [32, 64, 128, 256]
-    encoder_input_shape = [256, 256, 4]
+    encoder_filters = [16, 32, 64, 64]
+    encoder_input_shape = [256, 256, 1]
+    encoder_dropout_rate = 0.1
 
-    instance_decoder_output_shape =  [256, 256, 4]
-    instance_decoder_filters = [32, 64, 128, 256]
-
-    semantic_decoder_output_shape = [256, 256, 4]
-    semantic_decoder_filters = 	[32, 64, 128, 256]
-    semantic_decoder_n_classes = 1
+    instance_decoder_output_shape =  [256, 256, 1]
+    instance_decoder_filters = [16, 32, 64, 64]
+    instance_decoder_dropout_rate = 0.1
+    instance_decoder_n_instaces = 3
 
     inputs = layers.Input(shape=model_input_shape)
 
-    enc = pfa.encoder(encoder_input_shape, encoder_filters)
-    dec_semantic = pfa.semantic_decoder(
-        semantic_decoder_output_shape,
-        semantic_decoder_filters,
-        semantic_decoder_n_classes
+    enc = pfa.encoder(
+        encoder_input_shape,
+        encoder_filters,
+        dropout_rate=encoder_dropout_rate
     )
-    dec_intance = pfa.instance_decoder(
+
+    dec_intance = pfa.instance_decoder_v8(
         instance_decoder_output_shape,
-        instance_decoder_filters
+        instance_decoder_filters,
+        dropout_rate=instance_decoder_dropout_rate,
+        n_instances=instance_decoder_n_instaces
     )
 
     enc_outputs = enc(inputs)
     reversed_outputs = list(reversed(enc_outputs))
 
-    bkg = dec_semantic(reversed_outputs)
     cv, cm, com = dec_intance(reversed_outputs)
 
-    model = Model([inputs], [bkg, cv, cm, com])
+    model = Model([inputs], [cv, cm, com])
 
     checkpoint = tf.train.Checkpoint(model=model)
 
@@ -76,7 +76,7 @@ def main(model_id:str):
 
     checkpoint.restore(checkpoint_manager.latest_checkpoint).expect_partial()
 
-    js_dir = os.path.join(model_dir, "js")
+    js_dir = os.path.join(model_dir, f"js-{model_id}")
     if not os.path.exists(js_dir):
         os.mkdir(js_dir)
 
@@ -84,12 +84,18 @@ def main(model_id:str):
     if not os.path.exists(h5_dir):
         os.mkdir(h5_dir)
 
+    tf_path = os.path.join(model_dir, f"savedmodel-{model_id}")
+    if not os.path.exists(tf_path):
+        os.mkdir(tf_path)
+
     tfjs.converters.save_keras_model(model, js_dir)
     model.save(
-        os.path.join(h5_dir, "morpheus-deblend.h5"),
+        os.path.join(h5_dir, f"morpheus-deblend-{model_id}.h5"),
         save_format="h5",
         include_optimizer=False,
     )
+
+    model.save(tf_path, include_optimizer=False)
 
 
 if __name__=="__main__":
