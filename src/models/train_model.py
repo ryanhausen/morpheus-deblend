@@ -68,18 +68,19 @@ def training_func(
 
     if experiment_key:
         experiment = comet_ml.ExistingExperiment(
-            api_key=os.getenv("comet_key"), previous_experiment=experiment_key
+            #api_key=os.getenv("comet_key"), 
+            previous_experiment=experiment_key
         )
     else:
         experiment = comet_ml.Experiment(
-            api_key=os.getenv("comet_key"),
+            os.getenv("comet_key"),
             project_name=experiment_project_name,
             disabled=comet_disabled,
             auto_metric_logging=False,
         )
         experiment.log_parameters(config_str_to_dict(gin.config_str()))
-        experiment.set_code(
-            filename=os.path.join(LOCAL, model_code_file), overwrite=True
+        experiment.log_code(
+            file_name=os.path.join(LOCAL, model_code_file)
         )
         experiment_key = experiment.get_key()
 

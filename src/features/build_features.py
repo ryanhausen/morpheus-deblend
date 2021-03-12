@@ -25,11 +25,13 @@ import random
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from itertools import product, starmap, takewhile
+from multiprocessing import Pool
 from typing import Callable, List, Tuple
 
 import numpy as np
 import scarlet
 import scarlet.psf as psf
+import sharedmem
 from astropy.io import fits
 from astropy.wcs import WCS
 from scipy import signal
@@ -46,8 +48,8 @@ DATA_PATH_PROCESSED_TRAIN = os.path.join(DATA_PATH_PROCESSED, "train")
 DATA_PATH_PROCESSED_TEST = os.path.join(DATA_PATH_PROCESSED, "test")
 DATA_PATH_RAW = os.path.join(DATA_PATH, "raw")
 
-NUM_TRAIN_EXAMPLES = 5000
-NUM_TEST_EXAMPLES = 1000
+NUM_TRAIN_EXAMPLES = 2000
+NUM_TEST_EXAMPLES = 500
 
 
 def make_dirs():
@@ -148,50 +150,50 @@ def make_idx_collection(
     train:bool
 ) -> List[int]:
 
-    # FOR CATALOG LOCATIONS ====================================================
-    with open(os.path.join(DATA_PATH_PROCESSED, "interesting_sources"), "r") as f:
-        lines = [l.replace("(", "").replace(")", "").replace("'", "").strip().split(",") for l in f.readlines()[1:]]
+    # # FOR CATALOG LOCATIONS ====================================================
+    # with open(os.path.join(DATA_PATH_PROCESSED, "interesting_sources"), "r") as f:
+    #     lines = [l.replace("(", "").replace(")", "").replace("'", "").strip().split(",") for l in f.readlines()[1:]]
 
-    col_id, col_ra, col_dec, col_area, col_morph = 0, 1, 2, 3, 4
+    # col_id, col_ra, col_dec, col_area, col_morph = 0, 1, 2, 3, 4
 
-    spheroids = list(filter(lambda r: r[col_morph].strip()=="spheroid", lines))
-    disks = list(filter(lambda r: r[col_morph].strip()=="disk", lines))
-    irregulars = list(filter(lambda r: r[col_morph].strip()=="irregular", lines))
-    ps_compacts = list(filter(lambda r: r[col_morph].strip()=="ps_compact", lines))
+    # spheroids = list(filter(lambda r: r[col_morph].strip()=="spheroid", lines))
+    # disks = list(filter(lambda r: r[col_morph].strip()=="disk", lines))
+    # irregulars = list(filter(lambda r: r[col_morph].strip()=="irregular", lines))
+    # ps_compacts = list(filter(lambda r: r[col_morph].strip()=="ps_compact", lines))
 
-    train_ratio = 0.8
+    # train_ratio = 0.8
 
-    def get_split(vals):
-        idx = int(len(vals) * train_ratio)
-        if train:
-            return vals[:idx]
-        else:
-            return vals[idx:]
+    # def get_split(vals):
+    #     idx = int(len(vals) * train_ratio)
+    #     if train:
+    #         return vals[:idx]
+    #     else:
+    #         return vals[idx:]
 
-    # 'mask' is a header now, but used to be array change back in calling
-    # function if using random idxs
-    wcs = WCS(mask)
-    def convert_f(vals):
-        _id, ra, dec = vals[col_id].strip(), vals[col_ra].strip(), vals[col_dec].strip()
-        [[_x, _y]] = wcs.all_world2pix([[float(ra), float(dec)]], 0)
+    # # 'mask' is a header now, but used to be array change back in calling
+    # # function if using random idxs
+    # wcs = WCS(mask)
+    # def convert_f(vals):
+    #     _id, ra, dec = vals[col_id].strip(), vals[col_ra].strip(), vals[col_dec].strip()
+    #     [[_x, _y]] = wcs.all_world2pix([[float(ra), float(dec)]], 0)
 
 
-        y = int(_y) - img_size//2
-        x = int(_x) - img_size//2
+    #     y = int(_y) - img_size//2
+    #     x = int(_x) - img_size//2
 
-        return (int(_id), (y, x))
+    #     return (int(_id), (y, x))
 
-    all_srcs = (
-        get_split(spheroids)
-        + get_split(disks)
-        + get_split(irregulars)
-        + get_split(ps_compacts)
-    )
+    # all_srcs = (
+    #     get_split(spheroids)
+    #     + get_split(disks)
+    #     + get_split(irregulars)
+    #     + get_split(ps_compacts)
+    # )
 
-    vals = list(map(convert_f, all_srcs))
+    # vals = list(map(convert_f, all_srcs))
 
-    return vals
-    # FOR CATALOG LOCATIONS ====================================================
+    # return vals
+    # # FOR CATALOG LOCATIONS ====================================================
 
 
 
@@ -294,6 +296,7 @@ def build_center_mass_image(
 # ==============================================================================
 # ==============================================================================
 
+global_data = None
 
 def crop_convert_and_save(  #                   0:4    4:8       8       9:
     data: np.ndarray,  # [height, width, 12] = flux + weights + bkg +  morph(source pixels)
@@ -307,12 +310,20 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
     ys, xs = slice(y, y + img_size), slice(x, x + img_size)
 
     bands = ["h", "j", "v", "z"]
-    flux = np.transpose(data[ys, xs, :4].copy(), axes=(2, 0, 1))  # [b, h, w]
-    weights = np.transpose(data[ys, xs, 4:8].copy(), axes=(2, 0, 1))  # [b, h, w]
-    background = data[ys, xs, 8:9].copy()  # [h, w, 1]
-    catalog_data = np.transpose(data[ys, xs, 9:].copy(), axes=(2, 0, 1))  # [h, w, 5]
+    if global_data is not None:
+        flux = np.transpose(global_data[ys, xs, :4].copy(), axes=(2, 0, 1))  # [b, h, w]
+        weights = np.transpose(global_data[ys, xs, 4:8].copy(), axes=(2, 0, 1))  # [b, h, w]
+        background = global_data[ys, xs, 8:9].copy()  # [h, w, 1]
+        catalog_data = np.transpose(global_data[ys, xs, 9:].copy(), axes=(2, 0, 1))  # [h, w, 5]
 
-    source_locations = (catalog_data[0, :, :] > 0).astype(np.int)
+        source_locations = (catalog_data[0, :, :].copy() > 0).astype(np.int)
+    else:
+        flux = np.transpose(data[ys, xs, :4].copy(), axes=(2, 0, 1))  # [b, h, w]
+        weights = np.transpose(data[ys, xs, 4:8].copy(), axes=(2, 0, 1))  # [b, h, w]
+        background = data[ys, xs, 8:9].copy()  # [h, w, 1]
+        catalog_data = np.transpose(data[ys, xs, 9:].copy(), axes=(2, 0, 1))  # [h, w, 5]
+
+        source_locations = (catalog_data[0, :, :].copy() > 0).astype(np.int)
 
     model_psf = scarlet.GaussianPSF(sigma=(0.8,) * 4)
 
@@ -477,7 +488,7 @@ def main(img_size: int) -> None:
 
         # BUILD INDEXES ========================================================
         with fits.open(os.path.join(DATA_PATH_RAW, mask_fname)) as mask_hdul:
-            mask = mask_hdul[0].header  # pylint: disable=no-member
+            mask = mask_hdul[0].data  # pylint: disable=no-member
             val_array = data_catalog  # pylint: disable=no-member
 
             train_ys, train_xs = (11500, 21400), (3800, 19400)
@@ -584,26 +595,54 @@ def main(img_size: int) -> None:
         header = fits.getheader(data_fnames[0])
         wcs = WCS(header)
 
-        # TODO: change crop and save, to crop convert and save
-        train_crop_f = partial(
-            crop_convert_and_save, data, psfs, wcs, img_size, DATA_PATH_PROCESSED_TRAIN
-        )
+        if True:
+            global global_data
+            global_data = data
+            #mp_array = sharedmem.empty_like(data)
+            #mp_array[:] = data[:]
 
-        for _ in map(
-            train_crop_f,
-            tqdm(train_idxs, desc="Making training examples", total=NUM_TRAIN_EXAMPLES),
-        ):
-            pass
+            train_crop_f = partial(
+                crop_convert_and_save, None, psfs, wcs, img_size, DATA_PATH_PROCESSED_TRAIN
+            )
 
-        test_crop_f = partial(
-            crop_convert_and_save, data, psfs, wcs, img_size, DATA_PATH_PROCESSED_TEST
-        )
+            with Pool(30) as p:
+                p.map(
+                    train_crop_f,
+                    tqdm(train_idxs, desc="Making training examples", total=NUM_TRAIN_EXAMPLES),
+                )
 
-        for _ in map(
-            test_crop_f,
-            tqdm(test_idxs, desc="Making testing examples", total=NUM_TEST_EXAMPLES),
-        ):
-            pass
+
+            test_crop_f = partial(
+                crop_convert_and_save, None, psfs, wcs, img_size, DATA_PATH_PROCESSED_TEST
+            )
+
+            with Pool(30) as p:
+                p.map(
+                    test_crop_f,
+                    tqdm(test_idxs, desc="Making testing examples", total=NUM_TRAIN_EXAMPLES),
+                )
+        else:
+
+            # TODO: change crop and save, to crop convert and save
+            train_crop_f = partial(
+                crop_convert_and_save, data, psfs, wcs, img_size, DATA_PATH_PROCESSED_TRAIN
+            )
+
+            for _ in map(
+                train_crop_f,
+                tqdm(train_idxs, desc="Making training examples", total=NUM_TRAIN_EXAMPLES),
+            ):
+                pass
+
+            test_crop_f = partial(
+                crop_convert_and_save, data, psfs, wcs, img_size, DATA_PATH_PROCESSED_TEST
+            )
+
+            for _ in map(
+                test_crop_f,
+                tqdm(test_idxs, desc="Making testing examples", total=NUM_TEST_EXAMPLES),
+            ):
+                pass
 
 
 if __name__ == "__main__":

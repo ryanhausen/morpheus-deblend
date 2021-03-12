@@ -95,9 +95,12 @@ def get_model(
     elif instance_mode in ["v5", "v6", "v7"]:
         combined_outs = instance_decoder_v5()(reversed_outputs)
         return Model([inputs], combined_outs)
+    elif instance_mode in ["v8"]:
+        outputs = instance_decoder_v8()(reversed_outputs)
+        return Model([inputs], outputs)
     else:
         raise ValueError(
-            "Instance mode should be one of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7']"
+            "Instance mode should be one of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8']"
         )
 
 
@@ -488,6 +491,68 @@ def instance_decoder_v5(
     # INSTANCE OUT =============================================================
 
     return Model(inputs, [bkg, claim_vectors, claim_map, center_of_mass], name=name)
+
+
+@gin.configurable()
+def instance_decoder_v8(
+    output_shape: Tuple[int, int],
+    filters: List[int],
+    dropout_rate:float,
+    n_instances:int,
+    name:str = "MorpheusDeblendDecoder"
+) -> Model:
+    hw = output_shape[0]
+    input_shapes = list(
+        reversed(
+            [
+                [hw // (2 ** i), hw // (2 ** i), c]
+                for i, c in enumerate(filters, start=1)
+            ]
+        )
+    )
+
+    inputs = [layers.Input(shape=s) for s in input_shapes]
+    att_outs = list(starmap(
+        lambda s, x: AdaptiveFastAttention(c_prime=s[2])(x),
+        zip(input_shapes, inputs)
+    ))
+
+    # We map the filters in reverse order because we start small and grow the
+    # output back to the input resolution. We add an additional filter for the
+    # final upsample and out
+    fuse_funcs = list(
+        map(
+            lambda f: fuse_up(f, dropout_rate=dropout_rate, name_prefix=name),
+            list(reversed(filters[:-1])) + [filters[-1]],
+        )
+    )
+    fuse_funcs_y = list(zip(fuse_funcs, att_outs))
+
+    def apply_fuse(x: tf.Tensor, func_y: Tuple[LayerFunc, tf.Tensor]) -> tf.Tensor:
+        func, y = func_y
+        f_x = func(x, y)
+        return f_x
+
+    fuse_out = reduce(apply_fuse, fuse_funcs_y, None)
+    up_out = layers.UpSampling2D()(fuse_out)
+    pre_conv = partial(layers.Conv2D, 32, 5, padding="SAME")
+
+    # INSTANCE OUT =============================================================
+    claim_vectors_conv = layers.Conv2D(output_shape[2] * n_instances * 2, 1, padding="SAME")(pre_conv()(up_out))
+    claim_vectors = layers.Reshape(output_shape[:-1] + [n_instances, 2])(claim_vectors_conv)
+
+    claim_map_conv = layers.Conv2D(output_shape[2] * n_instances, 1, padding="SAME")(pre_conv()(up_out))
+    claim_map = layers.Reshape(output_shape + [n_instances])(claim_map_conv)
+
+    center_of_mass = layers.Conv2D(
+        1, 1,
+        padding="SAME",
+        activation="sigmoid"
+    )(pre_conv()(up_out))
+    # INSTANCE OUT =============================================================
+
+    return Model(inputs, [claim_vectors, claim_map, center_of_mass], name=name)
+
 
 @gin.configurable(allowlist=["kernel_size", "activation"])
 def res_down(

@@ -54,10 +54,10 @@ def grab_files_py(parent_dir:str, instance_mode:str, idx:int):
         fnames = ["flux", "background", "claim_vectors", "claim_maps", "center_of_mass"]
     elif instance_mode=="v5":
         fnames = ["flux", "background", "claim_vectors", "claim_maps", "center_of_mass"]
-    elif instance_mode in ["v6", "v7"]:
+    elif instance_mode in ["v6", "v7", "v8"]:
         fnames = ["flux", "background", "claim_vectors", "claim_maps", "center_of_mass"]
     else:
-        raise ValueError("instance_mode must be one of ['v1', 'v2', 'v3', 'v4', 'v6', 'v7']")
+        raise ValueError("instance_mode must be one of ['v1', 'v2', 'v3', 'v4', 'v6', 'v7', 'v8']")
 
     arrays = list(
         map(
@@ -167,7 +167,7 @@ def get_files(parent_dir:str, instance_mode:str, item_idx:tf.data.Dataset):
             claim_map,
             center_of_mass,
         )
-    elif instance_mode=="v7":
+    elif instance_mode in ["v7", "v8"]:
         n = 3
         n_bands = 1
         bands = slice(0,1)
@@ -200,7 +200,7 @@ def get_files(parent_dir:str, instance_mode:str, item_idx:tf.data.Dataset):
         )
     else:
         raise ValueError(
-            "instance_mode must be one of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7']"
+            "instance_mode must be one of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8']"
         )
 
     vals = tf.data.Dataset.from_tensors(vals)
@@ -215,14 +215,15 @@ def apply_and_shape(fn, inputs):
     return tf.reshape(fn(flat_channels), shape)
 
 
-@gin.configurable(allowlist=[
-    "flip_y",
-    "flip_x",
-    "translate_y",
-    "translate_x",
-    "rotate",
-    "instance_mode"
-])
+#@gin.configurable(allowlist=[
+#    "flip_y",
+#    "flip_x",
+#    "translate_y",
+#    "translate_x",
+#    "rotate",
+#    "instance_mode"
+#])
+@tf.function
 def augment(
     flux: tf.Tensor,
     background: tf.Tensor,

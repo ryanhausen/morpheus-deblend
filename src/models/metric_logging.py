@@ -107,15 +107,23 @@ def update_metrics(
     elif instance_mode=="v2":
         flux, y_bkg, y_claim_map, y_com = inputs
         yh_bkg, yh_claim_map, yh_com = outputs
+    elif instance_mode=="v8":
+        flux, y_bkg, y_claim_vector, y_claim_map, y_com = inputs
+        yh_claim_vector, yh_claim_map, yh_com = outputs
     else:
-        raise ValueError("instance_mode must in ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7']")
+        raise ValueError("instance_mode must in ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8']")
 
-    l_semantic = losses.semantic_loss(y=y_bkg, yh=yh_bkg, flux=flux)
+
     l_cm = losses.claim_map_loss(bkg=y_bkg, y=y_claim_map, yh=yh_claim_map, flux=flux)
     l_com = losses.center_of_mass_loss(y=y_com, yh=yh_com, flux=flux)
     l_total = losses.loss_function(inputs, outputs)
 
-    if instance_mode in ["v1", "v4", "v5", "v6", "v7"]:
+
+    if instance_mode != "v8":
+        l_semantic = losses.semantic_loss(y=y_bkg, yh=yh_bkg, flux=flux)
+
+
+    if instance_mode in ["v1", "v4", "v5", "v6", "v7", "v8"]:
         l_cv = losses.claim_vector_loss(
             bkg=y_bkg,
             y_claim_map=y_claim_map,
@@ -132,13 +140,17 @@ def update_metrics(
 
     if is_training:
         metrics = [
-            ("SemanticLoss", l_semantic * lambda_semantic),
             ("ClaimMapLoss", l_cm * lambda_claim_map),
             ("CenterOfMassLoss", l_com * lambda_center_of_mass),
             ("Loss", l_total),
         ]
 
-        if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7"]:
+        if instance_mode != "v8":
+            metrics.append(
+                ("SemanticLoss", l_semantic * lambda_semantic)
+            )
+
+        if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7", "v8"]:
             metrics.append(
                 ("ClaimVectorLoss", l_cv * lambda_claim_vector),
             )
@@ -146,19 +158,21 @@ def update_metrics(
         for _ in starmap(experiment.log_metric, metrics):
             pass
 
-        experiment.log_image(
-            np.flipud(y_bkg[-1,...]),
-            "InputBackground",
-            image_colormap="Greys",
-            image_minmax=(0, 1)
-        )
 
-        experiment.log_image(
-            np.flipud(expit(yh_bkg[-1,...])),
-            "OutputBackground",
-            image_colormap="Greys",
-            image_minmax=(0, 1)
-        )
+        if instance_mode != "v8":
+            experiment.log_image(
+                np.flipud(y_bkg[-1,...]),
+                "InputBackground",
+                image_colormap="Greys",
+                image_minmax=(0, 1)
+            )
+
+            experiment.log_image(
+                np.flipud(expit(yh_bkg[-1,...])),
+                "OutputBackground",
+                image_colormap="Greys",
+                image_minmax=(0, 1)
+            )
 
 
         experiment.log_image(
@@ -211,8 +225,10 @@ def update_metrics(
                 image_minmax=(0, 1)
             )
 
-        # log color vector representations
-        if instance_mode in ["v5", "v6", "v7"]:
+        # log vector images
+        if instance_mode in ["v5", "v6", "v7", "v8"]:
+
+            # color vector representations
             cv_cm_vals = [
                 (
                     y_claim_vector.numpy()[-1, ...],
@@ -272,30 +288,87 @@ def update_metrics(
                 )
                 plt.close(f)
 
+            names = ["Input", "Output"]
+
+
+
+            cv_y = y_claim_vector.numpy()[-1, ...] # [h, w, k, 2]
+            cv_yh = yh_claim_vector.numpy()[-1, ...]   # [h, w, k, 2]
+
+            f, axes = plt.subplots(
+                ncols=2,
+                nrows=n_instance,
+                figsize=(8, 20),
+            )
+
+            for i, ax in enumerate(axes.flat):
+                single_cv_y = cv_y[:, :, i//2, :].copy()   # [h, w, 2]
+                single_cv_yh = cv_yh[:, :, i//2, :].copy() # [h, w, 2]
+
+                mag_y = np.linalg.norm(single_cv_y, axis=-1)   # [h, w]
+                mag_yh = np.linalg.norm(single_cv_yh, axis=-1) # [h, w]
+                # cosine similarity
+                if i % 2 == 0:
+
+                    cos_sim = (single_cv_y * single_cv_yh).sum(axis=-1) / (mag_y * mag_yh)
+
+                    img_cmap = ax.imshow(cos_sim, origin="lower", vmin=-1, vmax=1)
+                    divider = make_axes_locatable(ax)
+                    cax = divider.append_axes('right', size='5%', pad=0.05)
+                    f.colorbar(img_cmap, cax=cax, orientation='vertical')
+                # magnitude difference
+                else:
+                    mag_diff = mag_y - mag_yh
+
+                    img_cmap = ax.imshow(mag_diff, origin="lower")
+                    divider = make_axes_locatable(ax)
+                    cax = divider.append_axes('right', size='5%', pad=0.05)
+                    f.colorbar(img_cmap, cax=cax, orientation='vertical')
+
+                ax.set_xticks([])
+                ax.set_yticks([])
+
+            axes[0, 0].set_title("Cosine Similarity")
+            axes[0, 1].set_title("Magnitude Difference")
+            plt.tight_layout()
+
+            experiment.log_figure(
+                figure_name=f"{name}-CosSim/MagDiff",
+                figure=f,
+            )
+            plt.close(f)
+
 
     else:
         n = flux.shape[0]
-        _semantic_loss.update_state(l_semantic * lambda_semantic, n)
+        idx = np.random.randint(n)
+
+
         _claim_map_loss.update_state(l_cm * lambda_claim_map, n)
         _center_of_mass_loss.update_state(l_com * lambda_center_of_mass, n)
         _total_loss.update_state(l_total, n)
 
-        if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7"]:
+        if instance_mode != "v8":
+            _semantic_loss.update_state(l_semantic * lambda_semantic, n)
+
+        if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7", "v8"]:
             _claim_vector_loss.update_state(l_cv * lambda_claim_vector, n)
 
 
         if epoch_progress >= 1:
             metrics = [
-                ("SemanticLoss", _semantic_loss),
                 ("ClaimMapLoss", _claim_map_loss),
                 ("CenterOfMassLoss", _center_of_mass_loss),
                 ("Loss", _total_loss),
             ]
 
-            if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7"]:
+            if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7", "v8"]:
                 metrics.append(
                     ("ClaimVectorLoss", _claim_vector_loss),
                 )
+
+            if instance_mode != "v8":
+                metrics.append(("SemanticLoss", _semantic_loss))
 
             def send_and_reset(name, metric):
                 experiment.log_metric(name, metric.result().numpy())
@@ -305,80 +378,81 @@ def update_metrics(
                 pass
 
 
-            experiment.log_image(
-                np.flipud(y_bkg[-1,...]),
-                "InputBackground",
-                image_colormap="Greys",
-                image_minmax=(0, 1)
-            )
+            if instance_mode != "v8":
+                experiment.log_image(
+                    np.flipud(y_bkg[idx,...]),
+                    "InputBackground",
+                    image_colormap="Greys",
+                    image_minmax=(0, 1)
+                )
+
+                experiment.log_image(
+                    np.flipud(expit(yh_bkg[idx,...])),
+                    "OutputBackground",
+                    image_colormap="Greys",
+                    image_minmax=(0, 1)
+                )
+
 
             experiment.log_image(
-                np.flipud(expit(yh_bkg[-1,...])),
-                "OutputBackground",
-                image_colormap="Greys",
-                image_minmax=(0, 1)
-            )
-
-
-            experiment.log_image(
-                np.flipud(y_com[-1,...]),
+                np.flipud(y_com[idx,...]),
                 "InputCenterOfMass",
                 image_colormap="Greys",
                 image_minmax=(0, 1)
             )
 
             experiment.log_image(
-                np.flipud(yh_com[-1,...]),
+                np.flipud(yh_com[idx,...]),
                 "OutputCenterOfMass",
                 image_colormap="Greys",
                 image_minmax=(0, 1)
             )
 
             experiment.log_image(
-                np.flipud(scale_image(flux[-1,:, :, 0].numpy())),
+                np.flipud(scale_image(flux[idx,:, :, 0].numpy())),
                 "Input-H",
                 image_colormap="Greys"
             )
 
             if instance_mode=="v2":
                 experiment.log_image(
-                    np.flipud(y_claim_map[-1, :, :, 0, 0]),
+                    np.flipud(y_claim_map[idx, :, :, 0, 0]),
                     "InputClaimMapClose1",
                     image_colormap="Greys",
                     image_minmax=(0, 1)
                 )
 
                 experiment.log_image(
-                    np.flipud(yh_claim_map[-1, :, :, 0, 0]),
+                    np.flipud(yh_claim_map[idx, :, :, 0, 0]),
                     "OutputClaimMapClose1",
                     image_colormap="Greys",
                     image_minmax=(0, 1)
                 )
 
                 experiment.log_image(
-                    np.flipud(y_claim_map[-1, :, :, 0, 1]),
+                    np.flipud(y_claim_map[idx, :, :, 0, 1]),
                     "InputClaimMapClose2",
                     image_colormap="Greys",
                     image_minmax=(0, 1)
                 )
 
                 experiment.log_image(
-                    np.flipud(yh_claim_map[-1, :, :, 0, 1]),
+                    np.flipud(yh_claim_map[idx, :, :, 0, 1]),
                     "OutputClaimMapClose2",
                     image_colormap="Greys",
                     image_minmax=(0, 1)
                 )
 
             # log color vector representations
-            if instance_mode in ["v5", "v6", "v7"]:
+            if instance_mode in ["v5", "v6", "v7", "v8"]:
                 cv_cm_vals = [
                     (
-                        y_claim_vector.numpy()[-1, ...],
-                        y_claim_map.numpy()[-1, ...],
+                        y_claim_vector.numpy()[idx, ...],
+                        y_claim_map.numpy()[idx, ...],
                     ),
                     (
-                        yh_claim_vector.numpy()[-1, ...],
-                        softmax(yh_claim_map.numpy()[-1, ...], axis=-1),
+                        yh_claim_vector.numpy()[idx, ...],
+                        softmax(yh_claim_map.numpy()[idx, ...], axis=-1),
                     ),
                 ]
 
@@ -425,3 +499,49 @@ def update_metrics(
                         figure=f,
                     )
                     plt.close(f)
+
+                cv_y = y_claim_vector.numpy()[idx, ...] # [h, w, k, 2]
+                cv_yh = yh_claim_vector.numpy()[idx, ...]   # [h, w, k, 2]
+
+                f, axes = plt.subplots(
+                    ncols=2,
+                    nrows=n_instance,
+                    figsize=(8, 20),
+                )
+
+                for i, ax in enumerate(axes.flat):
+                    single_cv_y = cv_y[:, :, i//2, :].copy()   # [h, w, 2]
+                    single_cv_yh = cv_yh[:, :, i//2, :].copy() # [h, w, 2]
+
+                    mag_y = np.linalg.norm(single_cv_y, axis=-1)   # [h, w]
+                    mag_yh = np.linalg.norm(single_cv_yh, axis=-1) # [h, w]
+                    # cosine similarity
+                    if i % 2 == 0:
+
+                        cos_sim = (single_cv_y * single_cv_yh).sum(axis=-1) / (mag_y * mag_yh)
+
+                        img_cmap = ax.imshow(cos_sim, origin="lower", vmin=-1, vmax=1)
+                        divider = make_axes_locatable(ax)
+                        cax = divider.append_axes('right', size='5%', pad=0.05)
+                        f.colorbar(img_cmap, cax=cax, orientation='vertical')
+                    # magnitude difference
+                    else:
+                        mag_diff = mag_y - mag_yh
+
+                        img_cmap = ax.imshow(mag_diff, origin="lower")
+                        divider = make_axes_locatable(ax)
+                        cax = divider.append_axes('right', size='5%', pad=0.05)
+                        f.colorbar(img_cmap, cax=cax, orientation='vertical')
+
+                    ax.set_xticks([])
+                    ax.set_yticks([])
+
+                axes[0, 0].set_title("Cosine Similarity")
+                axes[0, 1].set_title("Magnitude Difference")
+                plt.tight_layout()
+
+                experiment.log_figure(
+                    figure_name=f"{name}-CosSim/MagDiff",
+                    figure=f,
+                )
+                plt.close(f)
