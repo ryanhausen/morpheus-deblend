@@ -79,7 +79,7 @@ src.models.losses.loss_function.lambda_semantic = 0
 src.models.losses.loss_function.lambda_claim_vector = 0.06
 src.models.losses.loss_function.lambda_claim_map = 4
 src.models.losses.loss_function.lambda_center_of_mass = 15
-src.models.losses.loss_function.lambda_entropy_regularization = 0.0
+src.models.losses.loss_function.lambda_entropy_regularization = 1.0
 src.models.losses.loss_function.instance_mode = "v8"
 
 # src.models.losses ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -91,16 +91,17 @@ src.models.metric_logging.update_metrics.lambda_semantic = 0
 src.models.metric_logging.update_metrics.lambda_claim_vector = 0.06
 src.models.metric_logging.update_metrics.lambda_claim_map = 4
 src.models.metric_logging.update_metrics.lambda_center_of_mass = 15
+src.models.metric_logging.update_metrics.lambda_entropy_regularization = 1.0
 src.models.metric_logging.update_metrics.instance_mode = "v8"
 # src.models.metric_logging ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 
 # src.models.PanopticFastAttention vvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvvv
 src.models.PanopticFastAttention.get_model.input_shape = [256, 256, 1]
-src.models.PanopticFastAttention.get_model.instance_mode = "v8"
+src.models.PanopticFastAttention.get_model.instance_mode = "v9"
 
 src.models.PanopticFastAttention.encoder.input_shape = [256, 256, 1]
-src.models.PanopticFastAttention.encoder.filters = [16, 32, 64, 64]
+src.models.PanopticFastAttention.encoder.filters = [8, 16, 32, 32]
 src.models.PanopticFastAttention.encoder.dropout_rate = 0.1
 
 # src.models.PanopticFastAttention.semantic_decoder.output_shape = [256, 256, 4]
@@ -129,9 +130,14 @@ src.models.PanopticFastAttention.encoder.dropout_rate = 0.1
 # src.models.PanopticFastAttention.instance_decoder_v5.n_instances = 3
 
 src.models.PanopticFastAttention.instance_decoder_v8.output_shape = [256, 256, 1]
-src.models.PanopticFastAttention.instance_decoder_v8.filters = [16, 32, 64, 64]
+src.models.PanopticFastAttention.instance_decoder_v8.filters = [8, 16, 32, 32]
 src.models.PanopticFastAttention.instance_decoder_v8.dropout_rate = 0.1
 src.models.PanopticFastAttention.instance_decoder_v8.n_instances = 3
+
+src.models.PanopticFastAttention.instance_decoder_v9.output_shape = [256, 256, 1]
+src.models.PanopticFastAttention.instance_decoder_v9.filters = [8, 16, 32, 32]
+src.models.PanopticFastAttention.instance_decoder_v9.dropout_rate = 0.1
+src.models.PanopticFastAttention.instance_decoder_v9.n_instances = 3
 # src.models.PanopticFastAttention ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 

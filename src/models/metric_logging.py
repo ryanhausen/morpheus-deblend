@@ -54,6 +54,7 @@ _claim_vector_loss = MeanOfMeans()
 _claim_map_loss = MeanOfMeans()
 _center_of_mass_loss = MeanOfMeans()
 _total_loss = MeanOfMeans()
+_entropy_regularization = MeanOfMeans()
 
 def scale_image(data):
 
@@ -80,6 +81,7 @@ def scale_image(data):
     "lambda_claim_vector",
     "lambda_claim_map",
     "lambda_center_of_mass",
+    "lambda_entropy_regularization",
     "instance_mode",
 ])
 def update_metrics(
@@ -93,6 +95,7 @@ def update_metrics(
     lambda_claim_vector: float,
     lambda_claim_map: float,
     lambda_center_of_mass: float,
+    lambda_entropy_regularization:float,
     instance_mode:str,
  ) -> None:
     n_instance = 3
@@ -116,6 +119,7 @@ def update_metrics(
 
     l_cm = losses.claim_map_loss(bkg=y_bkg, y=y_claim_map, yh=yh_claim_map, flux=flux)
     l_com = losses.center_of_mass_loss(y=y_com, yh=yh_com, flux=flux)
+    l_entropy = losses.entropy_regularization(yh=yh_claim_map, flux=flux)
     l_total = losses.loss_function(inputs, outputs)
 
 
@@ -143,6 +147,7 @@ def update_metrics(
             ("ClaimMapLoss", l_cm * lambda_claim_map),
             ("CenterOfMassLoss", l_com * lambda_center_of_mass),
             ("Loss", l_total),
+            ("EntropyRegularization", l_entropy * lambda_entropy_regularization)
         ]
 
         if instance_mode != "v8":
@@ -347,6 +352,8 @@ def update_metrics(
         _claim_map_loss.update_state(l_cm * lambda_claim_map, n)
         _center_of_mass_loss.update_state(l_com * lambda_center_of_mass, n)
         _total_loss.update_state(l_total, n)
+        _entropy_regularization.update_state(l_entropy * lambda_entropy_regularization, n)
+
 
         if instance_mode != "v8":
             _semantic_loss.update_state(l_semantic * lambda_semantic, n)
@@ -360,6 +367,7 @@ def update_metrics(
                 ("ClaimMapLoss", _claim_map_loss),
                 ("CenterOfMassLoss", _center_of_mass_loss),
                 ("Loss", _total_loss),
+                ("EntropyRegularization", _entropy_regularization)
             ]
 
             if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7", "v8"]:

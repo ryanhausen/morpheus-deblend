@@ -98,9 +98,12 @@ def get_model(
     elif instance_mode in ["v8"]:
         outputs = instance_decoder_v8()(reversed_outputs)
         return Model([inputs], outputs)
+    elif instance_mode in ["v9"]:
+        outputs = instance_decoder_v9()(reversed_outputs)
+        return Model([inputs], outputs)
     else:
         raise ValueError(
-            "Instance mode should be one of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8']"
+            "Instance mode should be one of ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8', 'v9']"
         )
 
 
@@ -554,6 +557,126 @@ def instance_decoder_v8(
     return Model(inputs, [claim_vectors, claim_map, center_of_mass], name=name)
 
 
+@gin.configurable()
+def instance_decoder_v9(
+    output_shape: Tuple[int, int],
+    filters: List[int],
+    dropout_rate:float,
+    n_instances:int,
+    name:str = "MorpheusDeblendDecoder"
+) -> Model:
+    hw = output_shape[0]
+
+    input_shapes = list(
+        reversed(
+            [
+                [hw // (2 ** i), hw // (2 ** i), c]
+                for i, c in enumerate(filters, start=1)
+            ]
+        )
+    )
+
+    inputs = [layers.Input(shape=s) for s in input_shapes]
+
+
+    # ==========================================================================
+    # claim vectors & center of mass
+    # ==========================================================================
+    cv_att_outs = list(starmap(
+        lambda s, x: AdaptiveFastAttention(c_prime=s[2])(x),
+        zip(input_shapes, inputs)
+    ))
+
+    # We map the filters in reverse order because we start small and grow the
+    # output back to the input resolution. We add an additional filter for the
+    # final upsample and out
+    cv_fuse_funcs = list(
+        map(
+            lambda f: fuse_up(f, dropout_rate=dropout_rate, name_prefix=name),
+            list(reversed(filters[:-1])) + [filters[-1]],
+        )
+    )
+    cv_fuse_funcs_y = list(zip(cv_fuse_funcs, cv_att_outs))
+
+    # This list contains the outputs from the fuse up layers
+    cv_fuse_outs = []
+
+
+    def cv_apply_fuse(x: tf.Tensor, func_y: Tuple[LayerFunc, tf.Tensor]) -> tf.Tensor:
+        func, y = func_y
+        f_x = func(x, y)
+        cv_fuse_outs.append(
+            layers.Lambda(
+                tf.stop_gradient,
+                #name=f"StopGradient_{f_x.shape[-1]}",
+            )(f_x)
+        )
+        return f_x
+
+    cv_fuse_out = reduce(cv_apply_fuse, cv_fuse_funcs_y, None)
+    cv_up_out = layers.UpSampling2D()(cv_fuse_out)
+    cv_pre_conv = partial(layers.Conv2D, 32, 5, padding="SAME")
+
+    claim_vectors_conv = layers.Conv2D(
+        output_shape[2] * n_instances * 2,
+        1,
+        padding="SAME",
+        name="CLAIM_VECTORS_CONV"
+    )(cv_pre_conv()(cv_up_out))
+    claim_vectors = layers.Reshape(output_shape[:-1] + [n_instances, 2])(claim_vectors_conv)
+
+    center_of_mass = layers.Conv2D(
+        1, 1,
+        padding="SAME",
+        activation="sigmoid",
+        name="CENTER_OF_MASS_CONV",
+    )(cv_pre_conv()(cv_up_out))
+    # ==========================================================================
+    # ==========================================================================
+
+    # ==========================================================================
+    # claim maps
+    # ==========================================================================
+    enc_cv_concat = [layers.Concatenate(axis=-1)([cv, enc]) for cv, enc in zip(cv_fuse_outs, inputs)]
+
+    embed_c = partial(layers.Conv2D, kernel_size=3, padding="SAME")
+    embed_outs = [embed_c(f)(x) for f, x in zip(reversed(filters), enc_cv_concat)]
+
+    cm_att_outs = list(starmap(
+        lambda s, x: AdaptiveFastAttention(c_prime=x.shape[-1])(x),
+        zip(input_shapes, embed_outs)
+    ))
+
+    cm_fuse_funcs = list(
+        map(
+            lambda f: fuse_up(f, dropout_rate=dropout_rate, name_prefix=name),
+            list(reversed(filters[:-1])) + [filters[-1]],
+        )
+    )
+    cm_fuse_funcs_y = list(zip(cm_fuse_funcs, cm_att_outs))
+
+    def cm_apply_fuse(x: tf.Tensor, func_y: Tuple[LayerFunc, tf.Tensor]) -> tf.Tensor:
+        func, y = func_y
+        f_x = func(x, y)
+        return f_x
+
+    cm_fuse_out = reduce(cm_apply_fuse, cm_fuse_funcs_y, None)
+    cm_up_out = layers.UpSampling2D()(cm_fuse_out)
+    cm_pre_conv = partial(layers.Conv2D, 32, 5, padding="SAME")
+
+    claim_maps_conv = layers.Conv2D(
+        output_shape[2] * n_instances,
+        1,
+        padding="SAME",
+        name="CLAIM_MAPS_CONV",
+    )(cm_pre_conv()(cm_up_out))
+    claim_maps = layers.Reshape(output_shape + [n_instances])(claim_maps_conv)
+    # ==========================================================================
+    # ==========================================================================
+
+    return Model(inputs, [claim_vectors, claim_maps, center_of_mass], name=name)
+
+
 @gin.configurable(allowlist=["kernel_size", "activation"])
 def res_down(
     filters: int,
@@ -726,9 +849,14 @@ class AdaptiveFastAttention(tf.keras.layers.Layer):
         c_prime (int): The number of attention features in q and k
     """
 
-    def __init__(self, c_prime:int=128, **kwargs):
+    def __init__(self,
+        c_prime:int=128,
+        out_filters:int=None,
+        **kwargs
+    ):
         super(AdaptiveFastAttention, self).__init__(**kwargs)
         self.c_prime = c_prime
+        self.out_filters = out_filters
 
     @staticmethod
     def attention_qk_first(q, k, v):
@@ -747,8 +875,9 @@ class AdaptiveFastAttention(tf.keras.layers.Layer):
         h = w = input_shape[1]
         n = input_shape[1] * input_shape[2]
         c = input_shape[-1]
+        out_c = self.out_filters if self.out_filters else c
 
-        n_coef = tf.constant(1 / n, dtype=tf.float32)
+        n_coef = 1 / n
 
         self.Q = QKEncoder(self.c_prime)
         self.K = QKEncoder(self.c_prime)
@@ -767,7 +896,7 @@ class AdaptiveFastAttention(tf.keras.layers.Layer):
             self.multiply_qkv = AdaptiveFastAttention.attention_kv_first
 
         self.square_qkv = tf.keras.layers.Reshape([h, w, c])
-        self.conv = tf.keras.layers.Conv2D(c, 3, padding="SAME")
+        self.conv = tf.keras.layers.Conv2D(out_c, 3, padding="SAME")
         self.bn = tf.keras.layers.BatchNormalization()
         self.relu = tf.keras.layers.ReLU()
 
@@ -793,6 +922,9 @@ class AdaptiveFastAttention(tf.keras.layers.Layer):
 
 
 if __name__ == "__main__":
+
+    from tensorflow.keras.utils import plot_model
+
 
     def test_encoder():
         print("VALIDATING ENCODER SHAPE")
@@ -921,13 +1053,56 @@ if __name__ == "__main__":
     def test_instance_decoder_v5():
         pass
 
+    def test_instance_decoder_v9():
+        print("VALIDATING INSTANCE DECODER V3 SHAPE")
+        input_shape = [256, 256, 1]
+        layer_filters = [32, 64, 128, 256]
+        n_instances = 3
+        enc = encoder(
+            input_shape,
+            layer_filters,
+            dropout_rate=0.0,
+        )
+        inputs = np.ones([1, 256, 256, 1], dtype=np.float32)
+        enc_outs = enc(inputs)
+
+
+        output_shape = [256, 256, 1]
+
+        dec = instance_decoder_v9(
+            output_shape,
+            layer_filters,
+            dropout_rate=0.0,
+            n_instances=n_instances
+        )
+
+        plot_model(dec, to_file='instance_v9.png')
+
+        instance_outs = dec(list(reversed(enc_outs)))
+
+        expected_out_shapes = [
+            (1, 256, 256, n_instances, 2),
+            (1, 256, 256, 1, n_instances),
+            (1, 256, 256, 1)
+        ]
+
+        for o1, o2 in zip(instance_outs, expected_out_shapes):
+            assert o1.shape == o2, f"{o1.shape} != {o2}"
+        print("VALIDATION COMPLETE")
+
+
+
     def test_end_to_end():
         print("VALIDATING END TO END SHAPE")
 
         input_shape = [256, 256, 4]
         layer_filters = [32, 64, 128, 256]
 
-        enc = encoder(input_shape, layer_filters)
+        enc = encoder(
+            input_shape,
+            layer_filters,
+            0.0,
+        )
 
         output_shape = [256, 256]
         sem_dec = semantic_decoder(output_shape, layer_filters, 1)
@@ -966,5 +1141,6 @@ if __name__ == "__main__":
     #test_instance_decoder()
     #test_instance_decoder_v2()
     #test_instance_decoder_v3()
-    test_instance_decoder_v5()
+    #test_instance_decoder_v5()
+    test_instance_decoder_v9()
     #test_end_to_end()
