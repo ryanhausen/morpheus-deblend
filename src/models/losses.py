@@ -32,6 +32,50 @@ TensorLike = Union[tf.Tensor, np.ndarray]
 LOCAL = os.path.dirname(__file__)
 LOG_DIR = os.path.join(LOCAL, "data_log")
 
+@gin.configurable(allowlist=[
+    "lambda_claim_vector",
+    "lambda_center_of_mass",
+])
+def spatial_loss_function(
+    inputs: Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor],
+    outputs: Tuple[tf.Tensor, tf.Tensor],
+    lambda_claim_vector: float,
+    lambda_center_of_mass: float,
+):
+    flux, y_bkg, y_claim_vector, y_claim_map, y_com = inputs
+    yh_claim_vector, yh_com = outputs
+
+    loss = (
+        lambda_claim_vector * claim_vector_loss(bkg=y_bkg, y_claim_map=y_claim_map, y=y_claim_vector, yh=yh_claim_vector, flux=flux)
+        + lambda_center_of_mass * center_of_mass_loss(y=y_com, yh=yh_com, flux=flux)
+    )
+
+    return loss
+
+
+@gin.configurable(allowlist=[
+    "lambda_claim_map",
+    "lambda_entropy_regularization",
+])
+def attribution_loss_function(
+    inputs: Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor],
+    outputs: Tuple[tf.Tensor, tf.Tensor, tf.Tensor, tf.Tensor],
+    lambda_claim_map: float,
+    lambda_entropy_regularization:float,
+):
+
+    flux, y_bkg, _, y_claim_map, _ = inputs
+    yh_claim_map = outputs
+
+    loss = (
+        lambda_claim_map * claim_map_loss(bkg=y_bkg, y=y_claim_map, yh=yh_claim_map, flux=flux)
+        + lambda_entropy_regularization * entropy_regularization(yh=yh_claim_map, flux=flux)
+    )
+
+    return loss
+
+
+
 def nan_inf_detector(y, yh, loss, name):
 
     invalid_values_detected = tf.math.greater(

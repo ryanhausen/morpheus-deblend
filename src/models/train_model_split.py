@@ -32,7 +32,6 @@ from typing import Callable, Tuple, Union
 # /cm/local/apps/cuda/libs/418.67/pynvml/pynvml.py
 if os.getenv("ON_SLURM", default=None):
     import sys
-
     sys.path.reverse()
 
 
@@ -283,7 +282,9 @@ def execute_step(
             training=is_training
         )
 
-    return spatial_outputs, attribution_outputs
+    claim_vectors, center_of_mass = spatial_outputs
+    claim_maps = attribution_outputs
+    return (claim_vectors, center_of_mass, claim_maps)
 
 @gin.configurable(allowlist=["loss_func"])
 def step(

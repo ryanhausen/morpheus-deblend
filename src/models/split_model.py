@@ -33,30 +33,63 @@ Tensorlike = Union[tf.Tensor, np.ndarray]
 
 @gin.configurable()
 def get_spatial_model(
-    input_shape:List[str]
+    input_shape:List[str],
+    encoder_filters:List[int],
+    encoder_dropout_rate:float,
+    output_shape:List[int],
+    n_srcs:int,
+    decoder_filters:List[int],
+    decoder_dropout_rate:float,
 ) -> Model:
 
     inputs = layers.Input(shape=input_shape)
 
-    encoded = encoder()(inputs)
-    outputs = spatial_decoder()(list(reversed(encoded)))
+    encoded = encoder(
+        input_shape=input_shape,
+        filters=encoder_filters,
+        dropout_rate=encoder_dropout_rate,
+        name="MorpheusDeblendSpatialEncoder",
+    )(inputs)
+
+    outputs = spatial_decoder(
+        output_shape=output_shape,
+        filters=decoder_filters,
+        n=n_srcs,
+        dropout_rate=decoder_dropout_rate,
+    )(list(reversed(encoded)))
 
     return Model([inputs], [outputs])
 
 @gin.configurable()
 def get_attribution_model(
-      input_shape:List[str]
+    input_shape:List[str],
+    encoder_filters:List[int],
+    encoder_dropout_rate:float,
+    output_shape:List[int],
+    n_srcs:int,
+    decoder_filters:List[int],
+    decoder_dropout_rate:float,
 ) -> Model:
 
     inputs = layers.Input(shape=input_shape)
 
-    encoded = encoder()(inputs)
-    outputs = attribution_decoder()(list(reversed(encoded)))
+    encoded = encoder(
+        input_shape=input_shape,
+        filters=encoder_filters,
+        dropout_rate=encoder_dropout_rate,
+        name="MorpheusDeblendAttributionEncoder",
+    )(inputs)
+
+    outputs = attribution_decoder(
+        output_shape=output_shape,
+        filters=decoder_filters,
+        n=n_srcs,
+        dropout_rate=decoder_dropout_rate,
+    )(list(reversed(encoded)))
 
     return Model([inputs], [outputs])
 
 
-@gin.configurable()
 def encoder(
     input_shape: Tuple[int, int, int],
     filters: List[int],
@@ -99,7 +132,6 @@ def encoder(
     return Model([model_input], model_outputs, name=name)
 
 
-@gin.configurable()
 def attribution_decoder(
     output_shape: Tuple[int, int],
     filters: List[int],
@@ -146,7 +178,6 @@ def attribution_decoder(
     return Model(inputs, [claim_map], name=name)
 
 
-@gin.configurable()
 def spatial_decoder(
     output_shape: Tuple[int, int],
     filters: List[int],

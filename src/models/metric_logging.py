@@ -102,8 +102,6 @@ def update_metrics(
 
     epoch_progress = idx / batches_per_epoch
 
-
-
     if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7"]:
         flux, y_bkg, y_claim_vector, y_claim_map, y_com = inputs
         yh_bkg, yh_claim_vector, yh_claim_map, yh_com = outputs
@@ -113,6 +111,9 @@ def update_metrics(
     elif instance_mode=="v8":
         flux, y_bkg, y_claim_vector, y_claim_map, y_com = inputs
         yh_claim_vector, yh_claim_map, yh_com = outputs
+    elif instance_mode=="split":
+        flux, y_bkg, y_claim_vector, y_claim_map, y_com = inputs
+        yh_claim_vector, yh_com, yh_claim_map = outputs
     else:
         raise ValueError("instance_mode must in ['v1', 'v2', 'v3', 'v4', 'v5', 'v6', 'v7', 'v8']")
 
@@ -122,12 +123,11 @@ def update_metrics(
     l_entropy = losses.entropy_regularization(yh=yh_claim_map, flux=flux)
     l_total = losses.loss_function(inputs, outputs)
 
-
-    if instance_mode != "v8":
+    if instance_mode not in  ["v8", "split"]:
         l_semantic = losses.semantic_loss(y=y_bkg, yh=yh_bkg, flux=flux)
 
 
-    if instance_mode in ["v1", "v4", "v5", "v6", "v7", "v8"]:
+    if instance_mode in ["v1", "v4", "v5", "v6", "v7", "v8", "split"]:
         l_cv = losses.claim_vector_loss(
             bkg=y_bkg,
             y_claim_map=y_claim_map,
@@ -150,12 +150,12 @@ def update_metrics(
             ("EntropyRegularization", l_entropy * lambda_entropy_regularization)
         ]
 
-        if instance_mode != "v8":
+        if instance_mode not in ["v8", "split"]:
             metrics.append(
                 ("SemanticLoss", l_semantic * lambda_semantic)
             )
 
-        if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7", "v8"]:
+        if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7", "v8", "split"]:
             metrics.append(
                 ("ClaimVectorLoss", l_cv * lambda_claim_vector),
             )
@@ -231,7 +231,7 @@ def update_metrics(
             )
 
         # log vector images
-        if instance_mode in ["v5", "v6", "v7", "v8"]:
+        if instance_mode in ["v5", "v6", "v7", "v8", "split"]:
 
             # color vector representations
             cv_cm_vals = [
@@ -355,10 +355,10 @@ def update_metrics(
         _entropy_regularization.update_state(l_entropy * lambda_entropy_regularization, n)
 
 
-        if instance_mode != "v8":
+        if instance_mode not in  ["v8", "split"]:
             _semantic_loss.update_state(l_semantic * lambda_semantic, n)
 
-        if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7", "v8"]:
+        if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7", "v8", "split"]:
             _claim_vector_loss.update_state(l_cv * lambda_claim_vector, n)
 
 
@@ -370,12 +370,12 @@ def update_metrics(
                 ("EntropyRegularization", _entropy_regularization)
             ]
 
-            if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7", "v8"]:
+            if instance_mode in ["v1", "v3", "v4", "v5", "v6", "v7", "v8", "split"]:
                 metrics.append(
                     ("ClaimVectorLoss", _claim_vector_loss),
                 )
 
-            if instance_mode != "v8":
+            if instance_mode not in ["v8", "split"]:
                 metrics.append(("SemanticLoss", _semantic_loss))
 
             def send_and_reset(name, metric):
@@ -386,7 +386,7 @@ def update_metrics(
                 pass
 
 
-            if instance_mode != "v8":
+            if instance_mode not in ["v8", "split"]:
                 experiment.log_image(
                     np.flipud(y_bkg[idx,...]),
                     "InputBackground",
@@ -452,7 +452,7 @@ def update_metrics(
                 )
 
             # log color vector representations
-            if instance_mode in ["v5", "v6", "v7", "v8"]:
+            if instance_mode in ["v5", "v6", "v7", "v8", "split"]:
                 cv_cm_vals = [
                     (
                         y_claim_vector.numpy()[idx, ...],
