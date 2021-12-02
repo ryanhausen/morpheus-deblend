@@ -147,7 +147,7 @@ def make_idx_collection(
     end_y: int,
     start_x: int,
     end_x: int,
-    train:bool
+    train: bool,
 ) -> List[int]:
 
     # # FOR CATALOG LOCATIONS ====================================================
@@ -177,7 +177,6 @@ def make_idx_collection(
     #     _id, ra, dec = vals[col_id].strip(), vals[col_ra].strip(), vals[col_dec].strip()
     #     [[_x, _y]] = wcs.all_world2pix([[float(ra), float(dec)]], 0)
 
-
     #     y = int(_y) - img_size//2
     #     x = int(_x) - img_size//2
 
@@ -194,9 +193,6 @@ def make_idx_collection(
 
     # return vals
     # # FOR CATALOG LOCATIONS ====================================================
-
-
-
 
     # FOR RANDOM SLICES ========================================================
     y_gen = idx_generator(start_y, end_y)
@@ -298,6 +294,7 @@ def build_center_mass_image(
 
 global_data = None
 
+
 def crop_convert_and_save(  #                   0:4    4:8       8       9:
     data: np.ndarray,  # [height, width, 12] = flux + weights + bkg +  morph(source pixels)
     psfs: List[np.ndarray],
@@ -313,16 +310,22 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
     bands = ["h", "j", "v", "z"]
     if global_data is not None:
         flux = np.transpose(global_data[ys, xs, :4].copy(), axes=(2, 0, 1))  # [b, h, w]
-        weights = np.transpose(global_data[ys, xs, 4:8].copy(), axes=(2, 0, 1))  # [b, h, w]
+        weights = np.transpose(
+            global_data[ys, xs, 4:8].copy(), axes=(2, 0, 1)
+        )  # [b, h, w]
         background = global_data[ys, xs, 8:9].copy()  # [h, w, 1]
-        catalog_data = np.transpose(global_data[ys, xs, 9:].copy(), axes=(2, 0, 1))  # [h, w, 5]
+        catalog_data = np.transpose(
+            global_data[ys, xs, 9:].copy(), axes=(2, 0, 1)
+        )  # [h, w, 5]
 
         source_locations = (catalog_data[0, :, :].copy() > 0).astype(np.int)
     else:
         flux = np.transpose(data[ys, xs, :4].copy(), axes=(2, 0, 1))  # [b, h, w]
         weights = np.transpose(data[ys, xs, 4:8].copy(), axes=(2, 0, 1))  # [b, h, w]
         background = data[ys, xs, 8:9].copy()  # [h, w, 1]
-        catalog_data = np.transpose(data[ys, xs, 9:].copy(), axes=(2, 0, 1))  # [h, w, 5]
+        catalog_data = np.transpose(
+            data[ys, xs, 9:].copy(), axes=(2, 0, 1)
+        )  # [h, w, 5]
 
         source_locations = (catalog_data[0, :, :].copy() > 0).astype(np.int)
 
@@ -343,7 +346,6 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
     ys, xs = np.nonzero(source_locations)
     source_idxs = np.array(list(zip(ys, xs)))
 
-
     # CLAIM MAP ONLY ===========================================================
     # claim_map_image = label_encoder_decoder.get_claim_map(
     #     5,
@@ -353,7 +355,6 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
     # ) # [h, w, b, n]
     # CLAIM MAP ONLY ===========================================================
 
-
     # CLAIM VECTOR V1 ==========================================================
     # (
     #     claim_vector_image,
@@ -362,7 +363,6 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
     #     source_locations, background, flux.shape, scarlet_src_vals
     # )
     # CLAIM VECTOR V1 ==========================================================
-
 
     # CLAIM VECTOR MAGNITUDES instance v3=======================================
     # (
@@ -375,7 +375,6 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
     #     scarlet_src_vals,
     # )
     # CLAIM VECTOR MAGNITUDES instance v3=======================================
-
 
     # CLAIM VECTOR MAGNITUDES instance v5=======================================
     # n = 5
@@ -426,12 +425,7 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
         claim_vector_image,
         claim_map_image,
     ) = label_encoder_decoder.get_n_closest_claim_vector_map_limit_bands(
-        source_locations,
-        background,
-        flux.shape,
-        scarlet_src_vals,
-        n,
-        bands,
+        source_locations, background, flux.shape, scarlet_src_vals, n, bands,
     )
     # Limit bands, n closest vectors v8=========================================
 
@@ -447,13 +441,7 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
     save_names = list(
         map(
             fname_prefix,
-            [
-                "flux",
-                "background",
-                "center_of_mass",
-                "claim_vectors",
-                "claim_maps"
-            ],
+            ["flux", "background", "center_of_mass", "claim_vectors", "claim_maps"],
         )
     )
 
@@ -496,7 +484,13 @@ def main(img_size: int) -> None:
             test_ys, test_xs = (3200, 11500), (3000, 18000)
 
             train_idxs = make_idx_collection(
-                mask, val_array, img_size, NUM_TRAIN_EXAMPLES, *train_ys, *train_xs, True
+                mask,
+                val_array,
+                img_size,
+                NUM_TRAIN_EXAMPLES,
+                *train_ys,
+                *train_xs,
+                True,
             )
             test_idxs = make_idx_collection(
                 mask, val_array, img_size, NUM_TEST_EXAMPLES, *test_ys, *test_xs, False
@@ -518,10 +512,10 @@ def main(img_size: int) -> None:
                 overwrite=True,
             )
 
-#        for _ in map(rescale_psf, ["v", "z"]):
-#            pass
+        #        for _ in map(rescale_psf, ["v", "z"]):
+        #            pass
 
-#        fname = lambda b: f"{b}.fits" if b in "hj" else f"{b}_resized.fits"
+        #        fname = lambda b: f"{b}.fits" if b in "hj" else f"{b}_resized.fits"
         fname = lambda b: f"{b}.fits"
         psf_path = lambda b: os.path.join(DATA_PATH_RAW, "tinytim", fname(b))
         psfs = np.array([fits.getdata(psf_path(b)) for b in "hjvz"])
@@ -545,7 +539,6 @@ def main(img_size: int) -> None:
             os.path.join(DATA_PATH_RAW, get_full_name(fname_key))
             for fname_key in file_keywords
         ]
-
 
         big_array_fname = os.path.join(DATA_PATH_PROCESSED, "combined_array.dat")
         if not os.path.exists(big_array_fname):
@@ -599,8 +592,8 @@ def main(img_size: int) -> None:
         if True:
             global global_data
             global_data = data
-            #mp_array = sharedmem.empty_like(data)
-            #mp_array[:] = data[:]
+            # mp_array = sharedmem.empty_like(data)
+            # mp_array[:] = data[:]
 
             train_crop_f = partial(
                 crop_convert_and_save,
@@ -609,15 +602,18 @@ def main(img_size: int) -> None:
                 wcs,
                 img_size,
                 DATA_PATH_PROCESSED_TRAIN,
-                os.path.join(DATA_PATH_PROCESSED_SCARLET, "train")
+                os.path.join(DATA_PATH_PROCESSED_SCARLET, "train"),
             )
 
             with Pool(30) as p:
                 p.map(
                     train_crop_f,
-                    tqdm(train_idxs, desc="Making training examples", total=NUM_TRAIN_EXAMPLES),
+                    tqdm(
+                        train_idxs,
+                        desc="Making training examples",
+                        total=NUM_TRAIN_EXAMPLES,
+                    ),
                 )
-
 
             test_crop_f = partial(
                 crop_convert_and_save,
@@ -626,34 +622,54 @@ def main(img_size: int) -> None:
                 wcs,
                 img_size,
                 DATA_PATH_PROCESSED_TEST,
-                os.path.join(DATA_PATH_PROCESSED_SCARLET, "test")
+                os.path.join(DATA_PATH_PROCESSED_SCARLET, "test"),
             )
 
             with Pool(30) as p:
                 p.map(
                     test_crop_f,
-                    tqdm(test_idxs, desc="Making testing examples", total=NUM_TRAIN_EXAMPLES),
+                    tqdm(
+                        test_idxs,
+                        desc="Making testing examples",
+                        total=NUM_TRAIN_EXAMPLES,
+                    ),
                 )
         else:
 
             # TODO: change crop and save, to crop convert and save
             train_crop_f = partial(
-                crop_convert_and_save, data, psfs, wcs, img_size, DATA_PATH_PROCESSED_TRAIN
+                crop_convert_and_save,
+                data,
+                psfs,
+                wcs,
+                img_size,
+                DATA_PATH_PROCESSED_TRAIN,
             )
 
             for _ in map(
                 train_crop_f,
-                tqdm(train_idxs, desc="Making training examples", total=NUM_TRAIN_EXAMPLES),
+                tqdm(
+                    train_idxs,
+                    desc="Making training examples",
+                    total=NUM_TRAIN_EXAMPLES,
+                ),
             ):
                 pass
 
             test_crop_f = partial(
-                crop_convert_and_save, data, psfs, wcs, img_size, DATA_PATH_PROCESSED_TEST
+                crop_convert_and_save,
+                data,
+                psfs,
+                wcs,
+                img_size,
+                DATA_PATH_PROCESSED_TEST,
             )
 
             for _ in map(
                 test_crop_f,
-                tqdm(test_idxs, desc="Making testing examples", total=NUM_TEST_EXAMPLES),
+                tqdm(
+                    test_idxs, desc="Making testing examples", total=NUM_TEST_EXAMPLES
+                ),
             ):
                 pass
 

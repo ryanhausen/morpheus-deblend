@@ -65,6 +65,7 @@ def make_dirs():
     for _ in map(mk, dirs):  # apply func to each element
         pass
 
+
 def transform_catalog(catalog_fname: str, mask_fname: str):
     header = fits.getheader(mask_fname)
     wcs = WCS(header)
@@ -109,6 +110,7 @@ def transform_catalog(catalog_fname: str, mask_fname: str):
 
     return catalog_image
 
+
 def validate_idx(
     mask: np.ndarray,
     validate_array: np.ndarray,
@@ -145,57 +147,8 @@ def make_idx_collection(
     end_y: int,
     start_x: int,
     end_x: int,
-    train:bool
+    train: bool,
 ) -> List[int]:
-
-    # # FOR CATALOG LOCATIONS ====================================================
-    # with open(os.path.join(DATA_PATH_PROCESSED, "interesting_sources"), "r") as f:
-    #     lines = [l.replace("(", "").replace(")", "").replace("'", "").strip().split(",") for l in f.readlines()[1:]]
-
-    # col_id, col_ra, col_dec, col_area, col_morph = 0, 1, 2, 3, 4
-
-    # spheroids = list(filter(lambda r: r[col_morph].strip()=="spheroid", lines))
-    # disks = list(filter(lambda r: r[col_morph].strip()=="disk", lines))
-    # irregulars = list(filter(lambda r: r[col_morph].strip()=="irregular", lines))
-    # ps_compacts = list(filter(lambda r: r[col_morph].strip()=="ps_compact", lines))
-
-    # train_ratio = 0.8
-
-    # def get_split(vals):
-    #     idx = int(len(vals) * train_ratio)
-    #     if train:
-    #         return vals[:idx]
-    #     else:
-    #         return vals[idx:]
-
-    # # 'mask' is a header now, but used to be array change back in calling
-    # # function if using random idxs
-    # wcs = WCS(mask)
-    # def convert_f(vals):
-    #     _id, ra, dec = vals[col_id].strip(), vals[col_ra].strip(), vals[col_dec].strip()
-    #     [[_x, _y]] = wcs.all_world2pix([[float(ra), float(dec)]], 0)
-
-
-    #     y = int(_y) - img_size//2
-    #     x = int(_x) - img_size//2
-
-    #     return (int(_id), (y, x))
-
-    # all_srcs = (
-    #     get_split(spheroids)
-    #     + get_split(disks)
-    #     + get_split(irregulars)
-    #     + get_split(ps_compacts)
-    # )
-
-    # vals = list(map(convert_f, all_srcs))
-
-    # return vals
-    # # FOR CATALOG LOCATIONS ====================================================
-
-
-
-
     # FOR RANDOM SLICES ========================================================
     y_gen = idx_generator(start_y, end_y)
     x_gen = idx_generator(start_x, end_x)
@@ -231,6 +184,7 @@ def make_idx_collection(
         )
     ]
     # FOR RANDOM SLICES ========================================================
+
 
 # Center of Mass Label Functions ===============================================
 # https://stackoverflow.com/a/46892763/2691018
@@ -289,6 +243,289 @@ def build_center_mass_image(
 
     return center_of_mass[:, :, np.newaxis]
 
+
 # ==============================================================================
 # ==============================================================================
 
+
+def crop_convert_and_save(
+    n:int,
+    psfs: List[np.ndarray],
+    wcs: WCS,
+    img_size: int,
+    save_dir: str,
+    scarlet_dir: str,
+    iyx: Tuple[int, Tuple[int, int]],
+) -> None:
+    #                       0:4    4:8       8      9:
+    # [height, width, 12] = flux + weights + bkg +  morph(source pixels)
+    global global_data
+
+    i, (y, x) = iyx
+    ys, xs = slice(y, y + img_size), slice(x, x + img_size)
+
+    bands = ["h", "j", "v", "z"]
+
+    # we need to transpose the axes for the flux/weights so that it is
+    # compatible with SCARLET which wants the flux to be [b, h, w]
+    flux = np.transpose(global_data[ys, xs, :4].copy(), axes=(2, 0, 1))  # [b, h, w]
+    weights = np.transpose(
+        global_data[ys, xs, 4:8].copy(), axes=(2, 0, 1)
+    )  # [b, h, w]
+    background = global_data[ys, xs, 8:9].copy()  # [h, w, 1]
+    catalog_data = np.transpose(
+        global_data[ys, xs, 9:].copy(), axes=(2, 0, 1)
+    )  # [h, w, 5]
+
+    source_locations = (catalog_data[0, :, :].copy() > 0).astype(np.int)
+
+    model_psf = scarlet.GaussianPSF(sigma=(0.8,) * 4)
+
+    scarlet_file_path = os.path.join(scarlet_dir, f"{i}.fits")
+    if os.path.exists(scarlet_file_path):
+        scarlet_src_vals = [arr for arr in fits.getdata(scarlet_file_path)]
+    else:
+        scarlet_src_vals = scarlet_heplper.get_scarlet_fit(
+            bands, psfs, model_psf, flux, weights, catalog_data,
+        )
+
+        fits.PrimaryHDU(data=np.array(scarlet_src_vals)).writeto(scarlet_file_path)
+
+    center_of_mass = build_center_mass_image(source_locations, 51, 8)
+
+    ys, xs = np.nonzero(source_locations)
+    source_idxs = np.array(list(zip(ys, xs)))
+
+    # Need to update from here
+    (
+        claim_vector_image,
+        claim_map_image,
+    ) = label_encoder_decoder.get_n_closest_claim_vector_map_limit_bands(
+        source_locations, background, flux.shape, scarlet_src_vals, n, bands,
+    )
+
+    save_data = [
+        np.transpose(flux, axes=(1, 2, 0)), #flip the flux back to [h,w,b]
+        background,
+        center_of_mass,
+        claim_vector_image,
+        claim_map_image,
+    ]
+
+    fname_prefix = lambda s: f"{i}-{s}.fits"
+    save_names = list(
+        map(
+            fname_prefix,
+            ["flux", "background", "center_of_mass", "claim_vectors", "claim_maps"],
+        )
+    )
+
+    def save_f(name, arr):
+        fits.PrimaryHDU(data=arr).writeto(os.path.join(save_dir, name))
+
+    for _ in starmap(save_f, zip(save_names, save_data)):
+        pass
+
+
+def get_full_name(fname_key: str) -> str:
+    return next(filter(lambda f: fname_key in f, os.listdir(DATA_PATH_RAW)))
+
+
+def main(img_size: int, n:int=3) -> None:
+    make_dirs()
+
+    if (
+        len(os.listdir(DATA_PATH_PROCESSED_TRAIN)) > 0
+        or len(os.listdir(DATA_PATH_PROCESSED_TEST)) > 0
+    ):
+        print(f"Files exists in {DATA_PATH_PROCESSED} skipping data extraction.")
+        return
+
+    random.seed(12171988)
+
+    # CATALOG ==============================================================
+    mask_fname = get_full_name("mask")
+    data_catalog = transform_catalog(
+        os.path.join(DATA_PATH_RAW, get_full_name("catalog")),
+        os.path.join(DATA_PATH_RAW, mask_fname),
+    )
+    # CATALOG ==============================================================
+
+    # BUILD INDEXES ========================================================
+    with fits.open(os.path.join(DATA_PATH_RAW, mask_fname)) as mask_hdul:
+        mask = mask_hdul[0].data  # pylint: disable=no-member
+        val_array = data_catalog  # pylint: disable=no-member
+
+        train_ys, train_xs = (11500, 21400), (3800, 19400)
+        test_ys, test_xs = (3200, 11500), (3000, 18000)
+
+        train_idxs = make_idx_collection(
+            mask, val_array, img_size, NUM_TRAIN_EXAMPLES, *train_ys, *train_xs, True
+        )
+        test_idxs = make_idx_collection(
+            mask, val_array, img_size, NUM_TEST_EXAMPLES, *test_ys, *test_xs, False
+        )
+        del mask
+    # BUILD INDEXES ========================================================
+
+    # PSFs =================================================================
+
+    def rescale_psf(band):
+        arr = rescale(
+            fits.getdata(os.path.join(DATA_PATH_RAW, "tinytim", f"{band}.fits")),
+            27 / 73,
+        )
+        arr /= arr.sum()
+
+        fits.PrimaryHDU(data=arr).writeto(
+            os.path.join(DATA_PATH_RAW, "tinytim", f"{band}_resized.fits"),
+            overwrite=True,
+        )
+
+    #        for _ in map(rescale_psf, ["v", "z"]):
+    #            pass
+
+    #        fname = lambda b: f"{b}.fits" if b in "hj" else f"{b}_resized.fits"
+    fname = lambda b: f"{b}.fits"
+    psf_path = lambda b: os.path.join(DATA_PATH_RAW, "tinytim", fname(b))
+    psfs = np.array([fits.getdata(psf_path(b)) for b in "hjvz"])
+
+    # PSFs =================================================================
+
+    # FLUX, WEIGHTS and MORPHOLOGIES =======================================
+    file_keywords = [
+        "f160w_v2.0_sci",
+        "f125w_v2.0_sci",
+        "f606w_v2.0_sci",
+        "f850lp_v2.0_sci",
+        "f160w_v2.0_wht",
+        "f125w_v2.0_wht",
+        "f606w_v2.0_wht",
+        "f850lp_v2.0_wht",
+        "background",
+    ]
+
+    data_fnames = [
+        os.path.join(DATA_PATH_RAW, get_full_name(fname_key))
+        for fname_key in file_keywords
+    ]
+
+    big_array_fname = os.path.join(DATA_PATH_PROCESSED, "combined_array.dat")
+    if not os.path.exists(big_array_fname):
+        data = np.memmap(
+            big_array_fname, dtype=np.float32, mode="w+", shape=(25000, 25000, 14)
+        )
+
+        def update_arr(i):
+            arr = fits.getdata(data_fnames[i])
+            data[:, :, i] = arr[:, :]
+            del arr
+
+        for _ in map(update_arr, tqdm(range(len(file_keywords)))):
+            pass
+
+        data[:, :, 9:] = data_catalog[:, :, :]
+
+        del data
+
+    data = np.memmap(
+        big_array_fname, dtype=np.float32, mode="r", shape=(25000, 25000, 14)
+    )
+
+    del data_catalog
+
+    print("Done opening")
+    # FLUX and MORPHOLOGIES ================================================
+
+    # ======================================================================
+    # Data is [height, width,
+    #             [ H_flx, J_flx, V_flx, Z_flx,
+    #               H_wht, J_wht, V_wht, Z_wht,
+    #               bkg,                        # full bkg image
+    #               sph,dsk,irr,psc,bkg         # these are single pixel
+    #             ]                             # catalog entries
+    #         ]
+    # ======================================================================
+    # data = np.concatenate([np.dstack(data_flux + data_wht + data_lbls), data_catalog], axis=-1)
+    # del data_catalog
+    # del data_flux
+    # del data_wht
+    # del data_lbls
+
+    print("Getting header")
+    header = fits.getheader(data_fnames[0])
+    wcs = WCS(header)
+    print("Header Retrieved")
+
+    # We make this global for memory conservation during parallelzation
+    global global_data
+    global_data = data
+
+    if True:
+
+        train_crop_f = partial(
+            crop_convert_and_save,
+            n,
+            psfs,
+            wcs,
+            img_size,
+            DATA_PATH_PROCESSED_TRAIN,
+            os.path.join(DATA_PATH_PROCESSED_SCARLET, "train"),
+        )
+
+        with Pool(30) as p:
+            p.map(
+                train_crop_f,
+                tqdm(
+                    train_idxs,
+                    desc="Making training examples",
+                    total=NUM_TRAIN_EXAMPLES,
+                ),
+            )
+
+        test_crop_f = partial(
+            crop_convert_and_save,
+            n,
+            psfs,
+            wcs,
+            img_size,
+            DATA_PATH_PROCESSED_TEST,
+            os.path.join(DATA_PATH_PROCESSED_SCARLET, "test"),
+        )
+
+        with Pool(30) as p:
+            p.map(
+                test_crop_f,
+                tqdm(
+                    test_idxs, desc="Making testing examples", total=NUM_TRAIN_EXAMPLES
+                ),
+            )
+    else:
+
+        # TODO: change crop and save, to crop convert and save
+        train_crop_f = partial(
+            crop_convert_and_save, data, psfs, wcs, img_size, DATA_PATH_PROCESSED_TRAIN
+        )
+
+        for _ in map(
+            train_crop_f,
+            tqdm(train_idxs, desc="Making training examples", total=NUM_TRAIN_EXAMPLES),
+        ):
+            pass
+
+        test_crop_f = partial(
+            crop_convert_and_save, data, psfs, wcs, img_size, DATA_PATH_PROCESSED_TEST
+        )
+
+        for _ in map(
+            test_crop_f,
+            tqdm(test_idxs, desc="Making testing examples", total=NUM_TEST_EXAMPLES),
+        ):
+            pass
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--input_size", type=int, default=256)
+
+    main(parser.parse_args().input_size)
