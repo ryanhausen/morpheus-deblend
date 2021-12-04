@@ -39,7 +39,7 @@ from skimage.transform import rescale, resize
 from tqdm import tqdm
 
 import src.features.scarlet_helper as scarlet_heplper
-import src.features.label_encoder_decoder as label_encoder_decoder
+import src.features.label_encoder_decoder_limited as label_encoder_decoder
 
 DATA_PATH = os.path.join(os.path.dirname(__file__), "../../data")
 DATA_PATH_PROCESSED = os.path.join(DATA_PATH, "processed")
@@ -246,12 +246,10 @@ def build_center_mass_image(
 
 # ==============================================================================
 # ==============================================================================
-
-
+global_data = None
 def crop_convert_and_save(
     n:int,
     psfs: List[np.ndarray],
-    wcs: WCS,
     img_size: int,
     save_dir: str,
     scarlet_dir: str,
@@ -279,8 +277,8 @@ def crop_convert_and_save(
 
     source_locations = (catalog_data[0, :, :].copy() > 0).astype(np.int)
 
+    # SCARLET Fit ==============================================================
     model_psf = scarlet.GaussianPSF(sigma=(0.8,) * 4)
-
     scarlet_file_path = os.path.join(scarlet_dir, f"{i}.fits")
     if os.path.exists(scarlet_file_path):
         scarlet_src_vals = [arr for arr in fits.getdata(scarlet_file_path)]
@@ -290,6 +288,7 @@ def crop_convert_and_save(
         )
 
         fits.PrimaryHDU(data=np.array(scarlet_src_vals)).writeto(scarlet_file_path)
+    # SCARLET Fit ==============================================================
 
     center_of_mass = build_center_mass_image(source_locations, 51, 8)
 
@@ -300,7 +299,7 @@ def crop_convert_and_save(
     (
         claim_vector_image,
         claim_map_image,
-    ) = label_encoder_decoder.get_n_closest_claim_vector_map_limit_bands(
+    ) = label_encoder_decoder.get_claim_vectors_maps(
         source_locations, background, flux.shape, scarlet_src_vals, n, bands,
     )
 
@@ -461,68 +460,44 @@ def main(img_size: int, n:int=3) -> None:
     global global_data
     global_data = data
 
-    if True:
 
-        train_crop_f = partial(
-            crop_convert_and_save,
-            n,
-            psfs,
-            wcs,
-            img_size,
-            DATA_PATH_PROCESSED_TRAIN,
-            os.path.join(DATA_PATH_PROCESSED_SCARLET, "train"),
-        )
+    train_crop_f = partial(
+        crop_convert_and_save,
+        n,
+        psfs,
+        wcs,
+        img_size,
+        DATA_PATH_PROCESSED_TRAIN,
+        os.path.join(DATA_PATH_PROCESSED_SCARLET, "train"),
+    )
 
-        with Pool(30) as p:
-            p.map(
-                train_crop_f,
-                tqdm(
-                    train_idxs,
-                    desc="Making training examples",
-                    total=NUM_TRAIN_EXAMPLES,
-                ),
-            )
-
-        test_crop_f = partial(
-            crop_convert_and_save,
-            n,
-            psfs,
-            wcs,
-            img_size,
-            DATA_PATH_PROCESSED_TEST,
-            os.path.join(DATA_PATH_PROCESSED_SCARLET, "test"),
-        )
-
-        with Pool(30) as p:
-            p.map(
-                test_crop_f,
-                tqdm(
-                    test_idxs, desc="Making testing examples", total=NUM_TRAIN_EXAMPLES
-                ),
-            )
-    else:
-
-        # TODO: change crop and save, to crop convert and save
-        train_crop_f = partial(
-            crop_convert_and_save, data, psfs, wcs, img_size, DATA_PATH_PROCESSED_TRAIN
-        )
-
-        for _ in map(
+    with Pool(30) as p:
+        p.map(
             train_crop_f,
-            tqdm(train_idxs, desc="Making training examples", total=NUM_TRAIN_EXAMPLES),
-        ):
-            pass
-
-        test_crop_f = partial(
-            crop_convert_and_save, data, psfs, wcs, img_size, DATA_PATH_PROCESSED_TEST
+            tqdm(
+                train_idxs,
+                desc="Making training examples",
+                total=NUM_TRAIN_EXAMPLES,
+            ),
         )
 
-        for _ in map(
-            test_crop_f,
-            tqdm(test_idxs, desc="Making testing examples", total=NUM_TEST_EXAMPLES),
-        ):
-            pass
+    test_crop_f = partial(
+        crop_convert_and_save,
+        n,
+        psfs,
+        wcs,
+        img_size,
+        DATA_PATH_PROCESSED_TEST,
+        os.path.join(DATA_PATH_PROCESSED_SCARLET, "test"),
+    )
 
+    with Pool(30) as p:
+        p.map(
+            test_crop_f,
+            tqdm(
+                test_idxs, desc="Making testing examples", total=NUM_TRAIN_EXAMPLES
+            ),
+        )
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
