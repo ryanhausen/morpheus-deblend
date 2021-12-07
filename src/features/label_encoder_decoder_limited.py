@@ -57,8 +57,36 @@ def encode(
     contribution_vectors[bkg_mask,...] = np.zeros([n, 2], dtype=np.float32)
     contribution_maps[bkg_mask,...] = np.ones([b, n], dtype=np.float32) * (1/n)
 
+    src_map = np.zeros([h, w], dtype=np.uint8)
+    src_map[source_locations[:, 0], source_locations[:, 1]] = 1
+
     # for each region
-    # count sources and make sure we remove the extra sources
+    # count sources and remove the extra sources
+    segmentation_map, _ = label(src_mask)
+    for region in regionprops(segmentation_map):
+        start_x, start_y, stop_x, stop_y = region.bbox
+        xs, ys = slice(start_x, stop_x), slice(start_y, stop_y)
+        sub_segmap = region.image_filled
+        n_srcs = src_map[ys, xs][sub_segmap].sum()
+
+        # If there are at least as many sources as we can encode then we need to
+        # keep all the claim vectors and claim maps
+        # else less soures in the region than we are trying to encode, for
+        # example a single source, so zero out the extra claim vectors/maps
+        if n_srcs >= n:
+            pass
+        else:
+            sub_cv = contribution_vectors[ys, xs, ...].copy() # [h', w', n, 2]
+            sub_cm = contribution_maps[ys, xs, ...].copy()    # [h', w', b, n]
+
+            sub_cv[background, n_srcs:, :] = 0
+
+            sub_cm[background, :, n_srcs:] = 0
+            sub_cm_totals = sub_cm.sum(axis=-1, keepdims=True) # [h', w', b, 1]
+            sub_cm /= sub_cm_totals
+
+            contribution_vectors[ys, xs, ...] = sub_cv
+            contribution_maps[ys, xs, ...] = sub_cm
 
     return contribution_vectors, contribution_maps
 
