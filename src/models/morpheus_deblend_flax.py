@@ -41,7 +41,17 @@ class MorpheusDeblend(nn.Module):
 
     """
 
+    pass
 
+
+class FuseUp(nn.Module):
+    pass
+
+class ResDown(nn.Module):
+    pass
+
+class AdaptiveFastAttenion(nn.Module):
+    pass
 
 
 
