@@ -21,8 +21,6 @@
 from functools import partial
 from typing import Any, Callable, Tuple, Union
 
-from jax._src.dtypes import dtype
-
 import gin
 import jax.image as jim
 import jax.numpy as jnp
@@ -114,7 +112,21 @@ class FuseUp(nn.Module):
 
 
 class ResDown(nn.Module):
-    pass
+    filters:int
+    activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+    dtype:Any = jnp.float32
+
+    def __call__(self, x:jnp.ndarray, train:bool) -> jnp.ndarray:
+
+        conv = partial(
+            nn.Conv,
+            kernel_size=(3, 3),
+            padding="SAME",
+            use_bias=True,
+            dtype=self.dtype,
+        )
+
+
 
 class AdaptiveFastAttenion(nn.Module):
     pass
