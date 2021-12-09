@@ -19,7 +19,7 @@
 # CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 from functools import partial
-from typing import Any, Callable, Tuple, Union
+from typing import Any, Callable, List, Sequence, Tuple, Union
 from warnings import filters
 from flax.linen import activation
 
@@ -49,6 +49,41 @@ class MorpheusDeblend(nn.Module):
     """
 
     pass
+
+
+class Encoder(nn.Module):
+    filters: Sequence[int]
+    activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+    dtype:Any = jnp.float32
+
+    def __call__(self, x:jnp.ndarray, train:bool) -> List[jnp.ndarray]:
+
+        outputs = []
+
+        for f in self.filters:
+            x = ResDown(f, self.activation, dtype=self.dtype)(x, train)
+            outputs.append(x)
+
+        return outputs
+
+
+class Decoder(nn.Module):
+    filters: Sequence[int]
+    activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
+    dtype:Any = jnp.float32
+
+    def __call__(self, x:List[jnp.ndarray], train:bool) -> jnp.ndarray:
+
+        upsample_input = None
+        for attention_input, f in zip(x, self.filters):
+            att_out = AdaptiveFastAttenion(
+                activation=self.activation
+            )(attention_input, train)
+            upsample_input = FuseUp(
+                f, activation=self.activation, dtype=self.dtype
+            )(att_out, upsample_input, train)
+
+        return upsample_input
 
 
 class FuseUp(nn.Module):
@@ -228,7 +263,7 @@ class VEncoder(nn.Module):
 
 
 class AdaptiveFastAttenion(nn.Module):
-    qk_embedding_dim:int = 128
+    qk_embedding_dim:int = None
     activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
     dtype=Any = jnp.float32
 
@@ -236,6 +271,9 @@ class AdaptiveFastAttenion(nn.Module):
     def __call__(self, x:jnp.ndarray, train:bool) -> jnp.ndarray:
         h, w, c = x.shape
         n = h * w
+
+        if self.qk_embedding_dim is None:
+            self.qk_embedding_dim = c
 
         q = QKEncoder(self.qk_embedding_dim)(x, train)
         k = QKEncoder(self.qk_embedding_dim)(x, train).T
@@ -265,10 +303,6 @@ class AdaptiveFastAttenion(nn.Module):
         x = self.activation(x)
 
         return x + residual_v
-
-
-
-
 
 
 def fuseup_tests():
