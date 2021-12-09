@@ -28,7 +28,10 @@ import numpy as np
 
 # A default function that gives an extended source prior
 def all_extended_source(
-    model_frame, observation, morpheus_label, source_yx,
+    model_frame,
+    observation,
+    morpheus_label,
+    source_yx,
 ) -> scarlet.component.FactorizedComponent:
     return scarlet.ExtendedSource(model_frame, source_yx, observation)
 

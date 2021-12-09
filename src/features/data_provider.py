@@ -278,7 +278,10 @@ def augment(
             theta = tf.random.uniform(shape=[], minval=1, maxval=360)
             rad = theta * pi / one_eighty
 
-            fn = partial(apply_and_shape, partial(tfa.image.rotate, angles=rad),)
+            fn = partial(
+                apply_and_shape,
+                partial(tfa.image.rotate, angles=rad),
+            )
 
             flux = fn(flux)
             background = fn(background)
@@ -310,7 +313,8 @@ def augment(
 
 @gin.configurable()
 def get_dataset(
-    batch_size: int, instance_mode: str,
+    batch_size: int,
+    instance_mode: str,
 ) -> Tuple[Tuple[tf.data.Dataset, int], Tuple[tf.data.Dataset, int]]:
     def get_idxs(directory: str):
         return list(set([f.split("-")[0] for f in os.listdir(directory)]))

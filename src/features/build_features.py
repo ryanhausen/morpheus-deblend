@@ -250,14 +250,20 @@ def insert_gaussian(image, g_kern, y, x) -> None:
     half_kernel_len = int(g_kern.shape[0] / 2)
 
     def image_slice_f(yx, bound):
-        return slice(max(yx - half_kernel_len, 0), min(yx + half_kernel_len, bound),)
+        return slice(
+            max(yx - half_kernel_len, 0),
+            min(yx + half_kernel_len, bound),
+        )
 
     def kernel_slice_f(yx, bound):
         begin = half_kernel_len - min(
             half_kernel_len, half_kernel_len - (half_kernel_len - yx)
         )
 
-        end = half_kernel_len + min(half_kernel_len, bound - yx,)
+        end = half_kernel_len + min(
+            half_kernel_len,
+            bound - yx,
+        )
 
         return slice(begin, end)
 
@@ -274,7 +280,9 @@ def insert_gaussian(image, g_kern, y, x) -> None:
 
 
 def build_center_mass_image(
-    source_locations: np.ndarray, gaussian_kernel_len: int, gaussian_kernel_std: int,
+    source_locations: np.ndarray,
+    gaussian_kernel_len: int,
+    gaussian_kernel_std: int,
 ) -> np.ndarray:
     center_of_mass = np.zeros_like(source_locations, dtype=np.float32)
     src_ys, src_xs = np.nonzero(source_locations)
@@ -336,7 +344,12 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
         scarlet_src_vals = [arr for arr in fits.getdata(scarlet_file_path)]
     else:
         scarlet_src_vals = scarlet_heplper.get_scarlet_fit(
-            bands, psfs, model_psf, flux, weights, catalog_data,
+            bands,
+            psfs,
+            model_psf,
+            flux,
+            weights,
+            catalog_data,
         )
 
         fits.PrimaryHDU(data=np.array(scarlet_src_vals)).writeto(scarlet_file_path)
@@ -425,7 +438,12 @@ def crop_convert_and_save(  #                   0:4    4:8       8       9:
         claim_vector_image,
         claim_map_image,
     ) = label_encoder_decoder.get_n_closest_claim_vector_map_limit_bands(
-        source_locations, background, flux.shape, scarlet_src_vals, n, bands,
+        source_locations,
+        background,
+        flux.shape,
+        scarlet_src_vals,
+        n,
+        bands,
     )
     # Limit bands, n closest vectors v8=========================================
 

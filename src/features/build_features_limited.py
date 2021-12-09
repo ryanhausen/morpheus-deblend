@@ -205,14 +205,20 @@ def insert_gaussian(image, g_kern, y, x) -> None:
     half_kernel_len = int(g_kern.shape[0] / 2)
 
     def image_slice_f(yx, bound):
-        return slice(max(yx - half_kernel_len, 0), min(yx + half_kernel_len, bound),)
+        return slice(
+            max(yx - half_kernel_len, 0),
+            min(yx + half_kernel_len, bound),
+        )
 
     def kernel_slice_f(yx, bound):
         begin = half_kernel_len - min(
             half_kernel_len, half_kernel_len - (half_kernel_len - yx)
         )
 
-        end = half_kernel_len + min(half_kernel_len, bound - yx,)
+        end = half_kernel_len + min(
+            half_kernel_len,
+            bound - yx,
+        )
 
         return slice(begin, end)
 
@@ -229,7 +235,9 @@ def insert_gaussian(image, g_kern, y, x) -> None:
 
 
 def build_center_mass_image(
-    source_locations: np.ndarray, gaussian_kernel_len: int, gaussian_kernel_std: int,
+    source_locations: np.ndarray,
+    gaussian_kernel_len: int,
+    gaussian_kernel_std: int,
 ) -> np.ndarray:
     center_of_mass = np.zeros_like(source_locations, dtype=np.float32)
     src_ys, src_xs = np.nonzero(source_locations)
@@ -247,8 +255,10 @@ def build_center_mass_image(
 # ==============================================================================
 # ==============================================================================
 global_data = None
+
+
 def crop_convert_and_save(
-    n:int,
+    n: int,
     psfs: List[np.ndarray],
     img_size: int,
     save_dir: str,
@@ -267,9 +277,7 @@ def crop_convert_and_save(
     # we need to transpose the axes for the flux/weights so that it is
     # compatible with SCARLET which wants the flux to be [b, h, w]
     flux = np.transpose(global_data[ys, xs, :4].copy(), axes=(2, 0, 1))  # [b, h, w]
-    weights = np.transpose(
-        global_data[ys, xs, 4:8].copy(), axes=(2, 0, 1)
-    )  # [b, h, w]
+    weights = np.transpose(global_data[ys, xs, 4:8].copy(), axes=(2, 0, 1))  # [b, h, w]
     background = global_data[ys, xs, 8:9].copy()  # [h, w, 1]
     catalog_data = np.transpose(
         global_data[ys, xs, 9:].copy(), axes=(2, 0, 1)
@@ -284,7 +292,12 @@ def crop_convert_and_save(
         scarlet_src_vals = [arr for arr in fits.getdata(scarlet_file_path)]
     else:
         scarlet_src_vals = scarlet_heplper.get_scarlet_fit(
-            bands, psfs, model_psf, flux, weights, catalog_data,
+            bands,
+            psfs,
+            model_psf,
+            flux,
+            weights,
+            catalog_data,
         )
 
         fits.PrimaryHDU(data=np.array(scarlet_src_vals)).writeto(scarlet_file_path)
@@ -300,11 +313,16 @@ def crop_convert_and_save(
         claim_vector_image,
         claim_map_image,
     ) = label_encoder_decoder.get_claim_vectors_maps(
-        source_locations, background, flux.shape, scarlet_src_vals, n, bands,
+        source_locations,
+        background,
+        flux.shape,
+        scarlet_src_vals,
+        n,
+        bands,
     )
 
     save_data = [
-        np.transpose(flux, axes=(1, 2, 0)), #flip the flux back to [h,w,b]
+        np.transpose(flux, axes=(1, 2, 0)),  # flip the flux back to [h,w,b]
         background,
         center_of_mass,
         claim_vector_image,
@@ -330,7 +348,7 @@ def get_full_name(fname_key: str) -> str:
     return next(filter(lambda f: fname_key in f, os.listdir(DATA_PATH_RAW)))
 
 
-def main(img_size: int, n:int=3) -> None:
+def main(img_size: int, n: int = 3) -> None:
     make_dirs()
 
     if (
@@ -460,7 +478,6 @@ def main(img_size: int, n:int=3) -> None:
     global global_data
     global_data = data
 
-
     train_crop_f = partial(
         crop_convert_and_save,
         n,
@@ -494,10 +511,9 @@ def main(img_size: int, n:int=3) -> None:
     with Pool(30) as p:
         p.map(
             test_crop_f,
-            tqdm(
-                test_idxs, desc="Making testing examples", total=NUM_TRAIN_EXAMPLES
-            ),
+            tqdm(test_idxs, desc="Making testing examples", total=NUM_TRAIN_EXAMPLES),
         )
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

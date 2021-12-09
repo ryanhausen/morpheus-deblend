@@ -9,11 +9,12 @@ from skimage.measure import label, regionprops
 from sklearn.metrics.pairwise import euclidean_distances
 from tqdm import tqdm
 
+
 def encode(
     source_locations: np.ndarray,
     scarlet_images: np.ndarray,
     background: np.ndarray,
-    bkg_threshold:float,
+    bkg_threshold: float,
     n: int,
     display_progress: bool,
 ) -> Tuple[np.ndarray, np.ndarray]:
@@ -52,10 +53,10 @@ def encode(
     any(starmap(encode_f, indices))  # `any` will force iterating over the iterable
 
     # use background to filter claim vectors/claim maps
-    bkg_mask = background>bkg_threshold
+    bkg_mask = background > bkg_threshold
     src_mask = np.logical_not(bkg_mask)
-    contribution_vectors[bkg_mask,...] = np.zeros([n, 2], dtype=np.float32)
-    contribution_maps[bkg_mask,...] = np.ones([b, n], dtype=np.float32) * (1/n)
+    contribution_vectors[bkg_mask, ...] = np.zeros([n, 2], dtype=np.float32)
+    contribution_maps[bkg_mask, ...] = np.ones([b, n], dtype=np.float32) * (1 / n)
 
     src_map = np.zeros([h, w], dtype=np.uint8)
     src_map[source_locations[:, 0], source_locations[:, 1]] = 1
@@ -76,19 +77,20 @@ def encode(
         if n_srcs >= n:
             pass
         else:
-            sub_cv = contribution_vectors[ys, xs, ...].copy() # [h', w', n, 2]
-            sub_cm = contribution_maps[ys, xs, ...].copy()    # [h', w', b, n]
+            sub_cv = contribution_vectors[ys, xs, ...].copy()  # [h', w', n, 2]
+            sub_cm = contribution_maps[ys, xs, ...].copy()  # [h', w', b, n]
 
             sub_cv[background, n_srcs:, :] = 0
 
             sub_cm[background, :, n_srcs:] = 0
-            sub_cm_totals = sub_cm.sum(axis=-1, keepdims=True) # [h', w', b, 1]
+            sub_cm_totals = sub_cm.sum(axis=-1, keepdims=True)  # [h', w', b, 1]
             sub_cm /= sub_cm_totals
 
             contribution_vectors[ys, xs, ...] = sub_cv
             contribution_maps[ys, xs, ...] = sub_cm
 
     return contribution_vectors, contribution_maps
+
 
 def _encode_single_pixel(
     contribution_vectors: np.ndarray,
