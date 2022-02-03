@@ -9,6 +9,10 @@
     <link rel="stylesheet" href="/css/pure-min.css">
     <link rel="stylesheet" href="/css/styles.css">
     <link rel="stylesheet" href="/css/layered-papers.css">
+    <script src="https://polyfill.io/v3/polyfill.min.js?features=es6"></script>
+    <script id="MathJax-script" async
+        src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js">
+    </script>
 </head>
 <body>
 
@@ -26,11 +30,11 @@
                 <div class="pure-u-1-4"></div>
                 <div class="pure-u-1-4">
                     <h2><a href="https://ryanhausen.github.io">Ryan Hausen</a></h2>
-                    <h3>University of California, Santa Cruz</h3>
+                    <h3>University of California</br>Santa Cruz</h3>
                 </div>
                 <div class="pure-u-1-4">
                     <h2><a href="https://robertson.sites.ucsc.edu/">Brant Robertson</a></h2>
-                    <h3>University of California, Santa Cruz</h3>
+                    <h3>University of California</br>Santa Cruz</h3>
                 </div>
                 <div class="pure-u-1-4"></div>
             </div>
@@ -62,7 +66,7 @@
 
         <div class="content">
             <h2 class="content-subhead">Abstract</h2>
-            <p>
+            <p style="text-align: justify;">
                 Astronomical source deblending is the process of separating the
                 contribution of individual stars or galaxies (sources) to an
                 image comprised of multiple, possibly overlapping sources.
@@ -77,6 +81,64 @@
                 detection and deblending in a manner tractable for deep learning
                 models. We provide a novel neural network implementation as a
                 demonstration of the method.
+            </p>
+
+            <h2 class="content-subhead">Highlights</h2>
+
+            <ol class="custom-marker parens-around decimal">
+                <li>
+                    <strong>
+                        We developed a new approach for the detection and
+                        deblending of astronomical sources.</br>
+                    </strong>
+                    <p>
+                        We propose a new format called the Partial Contribution
+                        Representation (PCR) which encodes the locations of the
+                        sources and the flux that the closest \(n\) sources
+                        contribute to any pixel \([i,j]\). The PCR encodes a
+                        variable number of sources in a fixed dimensional
+                        representation. The fixed dimensions of the PCR
+                        representation makes it tractable to deep learning.
+                    </p>
+                    <img src="imgs/pcr.svg">
+                </li>
+                <li>
+                    <strong>
+                        We developed a novel neural network architecture, called
+                        <en>Morpheus-Deblend</en>, that predicts the PCR encoding of an
+                        image using the flux only.</br>
+                    </strong>
+                    <p>
+                        Inprired by the approach used in <a
+                        href="https://arxiv.org/abs/1911.10194">(Cheng, et
+                        al)</a>, Morpheus uses a shared encoder with multiple
+                        decoders. By Predicting the PCR using flux only,
+                        Morpheus-Deblend can perform sophisticated deblending in
+                        the style of <a
+                        href="https://arxiv.org/abs/1802.10157">SCARLET</a>, but
+                        requiring less inputs than SCARLET.
+                    </p>
+                    <img src="imgs/architecture.svg">
+                </li>
+                <!-- <li>
+                    <strong>
+                        The PCR encoding is generic and can be applied with
+                        multiband images.</br>
+                    </strong>
+                    <p>
+
+                    </p>
+                </li> -->
+            </ol>
+
+            <h2 class="content-subhead">Ackowledgements</h2>
+            <p style="text-align: justify;">
+                Ryan would like to thank Roberto Manduchi for helpful
+                conversations. Brant acknowledges support from NASA contract
+                NNG16PJ25C and grant 80NSSC18K0563. The authors acknowledge use
+                of the <a href="https://lux-ucsc.readthedocs.io/en/latest/">lux
+                supercomputer</a> at UC Santa Cruz, funded by NSF MRI grant AST
+                1828315.
             </p>
         </div>
     </div>

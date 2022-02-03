@@ -33,7 +33,7 @@
     /* overflow: hidden; */
     position: relative;
     text-align: center;
-    width: 100%;
+    /* width: 100%; */
   }
 
   .hover-img * {
