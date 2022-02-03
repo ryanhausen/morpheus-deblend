@@ -8,55 +8,75 @@
     <title>Partial-Attribution Instance Segmentation</title>
     <link rel="stylesheet" href="/css/pure-min.css">
     <link rel="stylesheet" href="/css/styles.css">
+    <link rel="stylesheet" href="/css/layered-papers.css">
 </head>
 <body>
 
 <div id="layout">
     <div id="main">
         <div class="header">
-            <h1>Partial-Attribution Instance Segmentation for</h1>
-            <h1>Astronomical Source Detection and Deblending</h1>
+            <div class="pure-g">
+                <div class="pure-u-1-4"></div>
+                <div class="pure-u-1-2">
+                    <h1>Partial-Attribution Instance Segmentation for Astronomical Source Detection and Deblending</h1>
+                </div>
+                <div class="pure-u-1-4"></div>
+            </div>
             <div class="pure-g">
                 <div class="pure-u-1-4"></div>
                 <div class="pure-u-1-4">
-                    <h2>Ryan Hausen</h2>
+                    <h2><a href="https://ryanhausen.github.io">Ryan Hausen</a></h2>
+                    <h3>University of California, Santa Cruz</h3>
                 </div>
                 <div class="pure-u-1-4">
-                    <h2>Brant Robertson</h2>
+                    <h2><a href="https://robertson.sites.ucsc.edu/">Brant Robertson</a></h2>
+                    <h3>University of California, Santa Cruz</h3>
+                </div>
+                <div class="pure-u-1-4"></div>
+            </div>
+            <div class="pure-g">
+                <div class="pure-u-1-4"></div>
+                <div class="pure-u-1-4 container">
+                    <figure class="hover-img">
+                        <img class="layered-paper-code" style="height: 175px" src="imgs/repo-thumbnail.png">
+                        <figcaption>
+                        <a href="https://github.com/ryanhausen/morpheus-deblend">
+                            <h3>Code</h3>
+                        </a>
+                        </figcaption>
+                    </figure>
+                </div>
+                <div class="pure-u-1-4 container">
+                    <figure class="hover-img">
+                        <img class="layered-paper-big" style="height: 175px;" src="imgs/paper-thumbnail.png">
+                        <figcaption>
+                        <a href="https://arxiv.org/abs/2201.04714">
+                            <h3>arXiv</h3>
+                        </a>
+                        </figcaption>
+                    </figure>
                 </div>
                 <div class="pure-u-1-4"></div>
             </div>
         </div>
 
         <div class="content">
-            <h2 class="content-subhead">How to use this layout</h2>
+            <h2 class="content-subhead">Abstract</h2>
             <p>
-                To use this layout, you can just copy paste the HTML, along with the CSS in <a href="/layouts/side-menu/styles.css" alt="Side Menu CSS">side-menu.css</a>, and the JavaScript in <a href="/js/ui.js">ui.js</a>. The JS file uses vanilla JavaScript to simply toggle an <code>active</code> class that makes the menu responsive.
-            </p>
-
-            <h2 class="content-subhead">Now Let's Speak Some Latin</h2>
-            <p>
-                Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
-            </p>
-
-            <div class="pure-g">
-                <div class="pure-u-1-4">
-                    <img class="pure-img-responsive" src="http://farm3.staticflickr.com/2875/9069037713_1752f5daeb.jpg" alt="Peyto Lake">
-                </div>
-                <div class="pure-u-1-4">
-                    <img class="pure-img-responsive" src="http://farm3.staticflickr.com/2813/9069585985_80da8db54f.jpg" alt="Train">
-                </div>
-                <div class="pure-u-1-4">
-                    <img class="pure-img-responsive" src="http://farm6.staticflickr.com/5456/9121446012_c1640e42d0.jpg" alt="T-Shirt Store">
-                </div>
-                <div class="pure-u-1-4">
-                    <img class="pure-img-responsive" src="http://farm8.staticflickr.com/7357/9086701425_fda3024927.jpg" alt="Mountain">
-                </div>
-            </div>
-
-            <h2 class="content-subhead">Try Resizing your Browser</h2>
-            <p>
-                Lorem ipsum dolor sit amet, consectetur adipisicing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat. Duis aute irure dolor in reprehenderit in voluptate velit esse cillum dolore eu fugiat nulla pariatur. Excepteur sint occaecat cupidatat non proident, sunt in culpa qui officia deserunt mollit anim id est laborum.
+                Astronomical source deblending is the process of separating the
+                contribution of individual stars or galaxies (sources) to an
+                image comprised of multiple, possibly overlapping sources.
+                Astronomical sources display a wide range of sizes and
+                brightnesses and may show substantial overlap in images.
+                Astronomical imaging data can further challenge off-the-shelf
+                computer vision algorithms owing to its high dynamic range, low
+                signal-to-noise ratio, and unconventional image format. These
+                challenges make source deblending an open area of astronomical
+                research, and in this work, we introduce a new approach called
+                Partial-Attribution Instance Segmentation that enables source
+                detection and deblending in a manner tractable for deep learning
+                models. We provide a novel neural network implementation as a
+                demonstration of the method.
             </p>
         </div>
     </div>
