@@ -72,18 +72,23 @@ class Decoder(nn.Module):
     activation: Callable[[jnp.ndarray], jnp.ndarray] = nn.relu
     dtype:Any = jnp.float32
 
-    def __call__(self, x:List[jnp.ndarray], train:bool) -> jnp.ndarray:
+    def __call__(self, x:List[jnp.ndarray], train:bool) -> List[jnp.ndarray]:
 
+        outputs = []
         upsample_input = None
         for attention_input, f in zip(x, self.filters):
+
             att_out = AdaptiveFastAttenion(
                 activation=self.activation
             )(attention_input, train)
+
             upsample_input = FuseUp(
                 f, activation=self.activation, dtype=self.dtype
             )(att_out, upsample_input, train)
 
-        return upsample_input
+            outputs.append(upsample_input)
+
+        return outputs
 
 
 class FuseUp(nn.Module):
